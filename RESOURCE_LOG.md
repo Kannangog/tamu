@@ -105,5 +105,33 @@ This file tracks resource consumption, execution times, peak RAM, and disk utili
     - `outputs_v2/eval/staged_evaluation_sheet.png`
     - `outputs_v2/eval/evaluation_report.json`
 
+---
+
+## Phase 6 / Step 1: Overfit Sanity Benchmark (2026-10-26)
+
+- **Dataset**: 32 staged transitions from `data/manifests/staged_gym.manifest.json`.
+- **Architecture**: `KonnonStagedTransformer` ($d_{\text{model}} = 128$, 3 layers, 4 heads, $d_{\text{ff}} = 384$, max_seq_len = 192).
+- **Optimizer**: AdamW (lr = 2.0e-3, weight_decay = 0.0, cosine schedule to 1e-5).
+- **Training Progression**:
+  - Epoch 1: Loss 74.51728
+  - Epoch 25: Loss 3.25580 (25.4s)
+  - Epoch 50: Loss 0.77471 (50.8s)
+  - Epoch 75: Loss 0.10156 (75.9s)
+  - Epoch 100: Loss 0.00791 (102.0s)
+  - Epoch 150: Loss 0.00278 (153.6s)
+  - Epoch 200: Loss **0.00247** (205.8s)
+- **Execution Performance**:
+  - Total Training Time: **205.8s** (~1.03s / epoch).
+  - Peak WorkingSet64 RAM: **248.5 MB** (well below 1.2 GB limit).
+- **Greedy Decoding Reproduction (Teacher Forcing OFF)**:
+  - Exact Token Match Rate: **93.75%** (30 of 32 transitions matched 100% token-for-token).
+  - Mean Pixel Error (MAE): **0.002664** (normalized [0, 1]).
+  - Mean Pixel Error (MSE): **0.002269**.
+- **Saved Evidence**:
+  - Model Checkpoint: `outputs_v2/overfit/model_overfit.pt`
+  - Contact Sheet: `outputs_v2/overfit/overfit_contact_sheet.png`
+  - Quantitative Metrics: `outputs_v2/overfit/overfit_metrics.json`
+
+
 
 

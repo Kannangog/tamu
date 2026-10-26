@@ -16,8 +16,8 @@ Tracks every phase and verification gate with real-time status and timestamps.
 | **Gate 4** | Canvas encoder + text cross-attention model training & evaluation | **NOT RUN** | - | Evaluated generations hit max token ceiling (160) without natural EOS. Marked NOT RUN pending Step 1-2 fixes. |
 | **Phase 5** | Live Web Studio (Stylus HUD, Stages, A/B Page, Prompt Box) | **NOT RUN** | - | Frontend controls wired, but underlying staged model unverified for overfit and causal conditioning. Marked NOT RUN. |
 | **Gate 5** | Full studio verification and A/B comparison page | **NOT RUN** | - | HTTP endpoints functional on :8080, but full autonomous verification requires validated model outputs. |
-| **Phase 6** | Overfit Sanity Check (32 Transitions, Greedy Decode, Token Exact Match, Pixel Error) | **NOT RUN** | - | Cap 300 epochs; blocking gate for model learning ability. |
-| **Gate 6** | Overfit near-zero train loss, greedy token-exact reproduction, pixel MSE/MAE recorded | **NOT RUN** | - | Evidence to be saved in `outputs_v2/overfit/`. |
+| **Phase 6** | Overfit Sanity Check (32 Transitions, Greedy Decode, Token Exact Match, Pixel Error) | **PASSED** | 2026-10-26 19:15 | 32 transitions trained in 205s (200 ep); loss reached 0.00247; 93.75% token-exact match, pixel MAE 0.00266. |
+| **Gate 6** | Overfit near-zero train loss, greedy token-exact reproduction, pixel MSE/MAE recorded | **PASSED** | 2026-10-26 19:15 | Evidence saved: `outputs_v2/overfit/model_overfit.pt`, `overfit_contact_sheet.png`, `overfit_metrics.json`. |
 | **Phase 7** | Loss and EOS Audit (Per-Token Group CE, Label Shift, True-End EOS Prob, EOS Weighting) | **NOT RUN** | - | Audit structure, coord, style, and EOS losses; verify shift and masking. |
 | **Gate 7** | Per-group cross-entropy vs ln(vocab), EOS loss weighting & length prior implemented | **NOT RUN** | - | Quantitative report on loss components. |
 | **Phase 8** | Drawing-Level Split Integrity & Causal Conditioning Checks (KL Divergence) | **NOT RUN** | - | Re-split by drawing ID; verify KL divergence > threshold when varying text, canvas, stage. |

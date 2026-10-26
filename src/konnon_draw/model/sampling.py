@@ -41,16 +41,10 @@ def sample_stage_tokens(
 
     tokens = [BOS_TOKEN]
     input_t = torch.tensor([[BOS_TOKEN]], dtype=torch.long, device=device)
+    self_caches = None
+    cross_caches = None
 
-    # Precompute cross-attention KV caches once
-    with torch.no_grad():
-        _, self_caches, cross_caches = model(
-            input_t,
-            context=context,
-            start_pos=0,
-        )
-
-    for step in range(1, limit):
+    for step in range(0, limit):
         # Forward single token with cached keys/values
         with torch.no_grad():
             logits, self_caches, cross_caches = model(
@@ -71,11 +65,11 @@ def sample_stage_tokens(
 
         # Temperature scaling & Top-K filtering
         if temperature > 0:
-            next_logits = next_logits / max(1e-4, temperature)
+            scaled_logits = next_logits / max(1e-4, temperature)
             if top_k > 0:
-                v, _ = torch.topk(next_logits, min(top_k, next_logits.size(-1)))
-                next_logits[next_logits < v[-1]] = -float("inf")
-            probs = F.softmax(next_logits, dim=-1)
+                v, _ = torch.topk(scaled_logits, min(top_k, scaled_logits.size(-1)))
+                scaled_logits[scaled_logits < v[-1]] = -float("inf")
+            probs = F.softmax(scaled_logits, dim=-1)
             next_token = int(torch.multinomial(probs, num_samples=1).item())
         else:
             next_token = int(torch.argmax(next_logits).item())
