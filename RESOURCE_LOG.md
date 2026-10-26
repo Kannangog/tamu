@@ -57,4 +57,16 @@ This file tracks resource consumption, execution times, peak RAM, and disk utili
   - Execution Time: **8.42s** on CPU (supersampled 2x).
   - Peak WorkingSet64: **134.2 MB** (strictly bounded, well under 1.2 GB RSS limit).
 
+---
+
+## Phase 3: Synthetic Gym Data Pipeline (2026-10-26)
+
+- **Test Suite**: 103 passed in 11.37s (5 new tests in `test_phase3_gym.py`).
+- **Data Generator Execution**:
+  - Generator: `generate_staged_gym_data(num_samples=60, canvas_res=128, seed=42)`
+  - Output Manifest: `data/manifests/staged_gym.manifest.json`
+  - Total Staged Transitions: **180**
+  - Generation Time: **24.08s** on CPU (~0.13s per transition)
+  - Peak WorkingSet64: **182.5 MB** (strictly bounded, well below 1.2 GB limit).
+
 

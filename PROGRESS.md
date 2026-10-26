@@ -10,8 +10,8 @@ Tracks every phase and verification gate with real-time status and timestamps.
 | **Gate 1** | 1000-stroke render < 10s, determinism passes, 6 brush swatches verified | **PASSED** | 2026-10-26 17:28 | 1000 strokes in 1.82s (<10s); determinism bitwise match; `outputs/hand/swatches.png` rendered and inspected. |
 | **Phase 2** | Skill Library (mannequin3d, head_guide, linecraft, shading, effects, composition) | **PASSED** | 2026-10-26 17:36 | 6 skills modules implemented; 3D skeleton with pinhole camera; 98 unit tests passing. |
 | **Gate 2** | 4 scripted proof pieces in `outputs/hand_demos/` + contact sheet with honest notes | **PASSED** | 2026-10-26 17:36 | 4 pieces + 3 stage files + `gate2_contact_sheet.png` rendered; honest notes recorded in `FAILURES.md`. |
-| **Phase 3** | Synthetic Gym (staged dataset generator, pose sampler, captions) | **TODO** | - | - |
-| **Gate 3** | Staged dataset generated with manifests & stroke order augmentations | **TODO** | - | - |
+| **Phase 3** | Synthetic Gym (staged dataset generator, pose sampler, captions) | **PASSED** | 2026-10-26 17:41 | Multi-stage transitions generator (humans + objects), rich captions, 103 tests pass. |
+| **Gate 3** | Staged dataset generated with manifests & stroke order augmentations | **PASSED** | 2026-10-26 17:41 | 180 staged transitions generated; `data/manifests/staged_gym.manifest.json` saved. |
 | **Phase 4** | Text + Canvas Conditioned Stroke Model (v0) | **TODO** | - | - |
 | **Gate 4** | Canvas encoder + text cross-attention model training & evaluation | **TODO** | - | - |
 | **Phase 5** | Live Web Studio (Stylus, Stages, A/B Page, Prompt Box) | **TODO** | - | - |

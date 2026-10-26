@@ -1,0 +1,39 @@
+{
+  "dataset_name": "Konnon Draw Staged Gym",
+  "version": "1.0",
+  "date_created": "2026-10-26 17:40:14",
+  "license": "CC0 1.0 Universal (Self-Generated Synthetic)",
+  "source": "src/konnon_draw/gym/stage_generator.py",
+  "num_base_drawings": 4,
+  "num_stage_transitions": 14,
+  "canvas_resolution": [
+    64,
+    64
+  ],
+  "categories": [
+    "stand",
+    "walk",
+    "run",
+    "crouch",
+    "reach",
+    "sit",
+    "box",
+    "chair",
+    "bicycle",
+    "house"
+  ],
+  "stages": [
+    "layout",
+    "guide",
+    "sketch",
+    "ink",
+    "shade",
+    "effect"
+  ],
+  "transforms": [
+    "Loomis and 3D articulated kinematic projection",
+    "Pinhole camera orbit with random yaw/pitch",
+    "Progressive rasterization of prior canvas",
+    "Tokenization via discrete v2 vocabulary (V=604)"
+  ]
+}
