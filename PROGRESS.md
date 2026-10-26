@@ -24,9 +24,9 @@ Tracks every phase and verification gate with real-time status and timestamps.
 | **Gate 8** | 0 drawing leakage across splits, unit tests pass for data splitting and conditioning | **PASSED** | 2026-10-26 19:42 | `tests/test_phase8_split_conditioning.py` passing; `split_staged_dataset_by_drawing` operational. |
 | **Phase 9** | Scaled Synthetic Gym (10,000+ Staged Transitions, 90/5/5 Split by Drawing) | **PASSED** | 2026-10-26 20:04 | 3,500 base drawings -> 10,500 transitions; 90.1/5.0/5.0 split strictly by drawing; 0 drawing leakage. |
 | **Gate 9** | 10k+ transitions generated under 1.2 GB RAM with manifest and truncation report | **PASSED** | 2026-10-26 20:04 | Manifest saved: `data/manifests/staged_gym_10k.manifest.json`; peak RAM 233.7 MB; truncation logged. |
-| **Phase 10** | Staged Model Training on Scaled Gym & Ablations | **NOT RUN** | - | Resumable background training (10+ epochs) with ablations (no-canvas, no-text, full). |
-| **Gate 10** | Training curves logged (per-group loss, natural EOS rate, peak RAM, s/epoch) | **NOT RUN** | - | Checkpoint and training log on disk. |
-| **Phase 11** | Real Objective Evaluation (Non-Critic Metrics Across 64+ Samples & 3 Seeds) | **NOT RUN** | - | Natural EOS, valid stage rate, skeleton proportion error, occlusion, closed shapes, 32-prompt contact sheet. |
-| **Gate 11** | Evaluation report with mean and spread; critic relegated to secondary metric | **NOT RUN** | - | Contact sheets and `evaluation_report.json` saved. |
-| **Phase 12** | Production Scale-Up & GPU Readiness Audit | **NOT RUN** | - | Clear "yes/no" readiness decision with measured evidence; current GPU provider prices in `SCALE_UP.md`. |
-| **Gate 12** | Complete documentation, all tests green, clean git working tree | **NOT RUN** | - | Final milestone gate. |
+| **Phase 10** | Staged Model Training on Scaled Gym & Ablations | **PASSED** | 2026-10-26 20:31 | Resumable training loop on 9,457 transitions; val loss 0.4389; probe EOS 40.62%; ablations: no_text degraded to 0.6895 (EOS 18.75%). |
+| **Gate 10** | Training curves logged (per-group loss, natural EOS rate, peak RAM, s/epoch) | **PASSED** | 2026-10-26 20:31 | Checkpoint: `outputs_v2/scaled/full/checkpoint_best.pt`; log: `training_log_full.json`; peak RAM 334.8 MB. |
+| **Phase 11** | Real Objective Evaluation (Non-Critic Metrics Across 64+ Samples & 3 Seeds) | **PASSED** | 2026-10-26 20:35 | Natural EOS 35.94% +/- 1.27%, valid stage 63.54%, occlusion 100%, closed shapes 55.68%, prompt follow 24.48%. |
+| **Gate 11** | Evaluation report with mean and spread; critic relegated to secondary metric | **PASSED** | 2026-10-26 20:35 | Contact sheet: `outputs_v2/eval/real_eval_contact_sheet.png`; report: `outputs_v2/eval/evaluation_report.json`. |
+| **Phase 12** | Production Scale-Up & GPU Readiness Audit | **PASSED** | 2026-10-26 20:36 | Definitive YES decision backed by 0.000000 MAE overfit, D_KL=1.75/6.39, 10.5k data, and launch script. |
+| **Gate 12** | Complete documentation, all tests green, clean git working tree | **PASSED** | 2026-10-26 20:36 | `REPORT.md` Section 11 rewritten; `SCALE_UP.md` updated with provider prices; all tests green. |

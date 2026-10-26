@@ -172,8 +172,7 @@ def evaluate_probe_natural_eos(
             # Sample with length prior
             tokens = sample_stage_tokens(
                 model=model,
-                multimodal_context=multimodal_ctx,
-                stage_idx=stage_idx,
+                context=multimodal_ctx,
                 max_tokens=max_tokens,
                 temperature=0.0,  # greedy
                 device=device,
@@ -288,6 +287,17 @@ def train_scaled_model(
     print("\nEpoch | Train Loss | Val Loss | Nat EOS % | Wall (s) | RAM (MB) | LR")
     print("-" * 68)
 
+    text_cache: Dict[str, torch.Tensor] = {}
+
+    def get_cached_text_embeddings(caps: List[str]) -> torch.Tensor:
+        uncached = [c for c in set(caps) if c not in text_cache]
+        if uncached:
+            with torch.no_grad():
+                uncached_emb = text_encoder.encode_text(uncached, device=device)
+                for c, e in zip(uncached, uncached_emb):
+                    text_cache[c] = e
+        return torch.stack([text_cache[c] for c in caps], dim=0)
+
     for epoch in range(start_epoch, max_epochs + 1):
         t_start = time.time()
         model.train()
@@ -309,8 +319,7 @@ def train_scaled_model(
             targets = tokens[:, 1:]
 
             optimizer.zero_grad()
-            with torch.no_grad():
-                text_emb = text_encoder.encode_text(captions, device=device)
+            text_emb = get_cached_text_embeddings(captions)
 
             ctx = model.build_multimodal_context(
                 text_embeddings=text_emb,
@@ -330,6 +339,8 @@ def train_scaled_model(
 
             train_loss_accum += float(loss.item())
             train_batches += 1
+            if train_batches % 75 == 0 or train_batches == len(train_loader):
+                print(f"  [Epoch {epoch:2d}] Batch {train_batches:3d}/{len(train_loader):3d} | Loss: {loss.item():.4f} | RAM: {process.memory_info().rss/(1024*1024):.1f} MB", flush=True)
 
         scheduler.step()
         train_loss = train_loss_accum / max(1, train_batches)
@@ -356,7 +367,7 @@ def train_scaled_model(
                 inputs = tokens[:, :-1]
                 targets = tokens[:, 1:]
 
-                text_emb = text_encoder.encode_text(captions, device=device)
+                text_emb = get_cached_text_embeddings(captions)
                 ctx = model.build_multimodal_context(
                     text_embeddings=text_emb,
                     canvas=canvases,
@@ -411,7 +422,7 @@ def train_scaled_model(
         }
         history.append(epoch_record)
 
-        print(f"{epoch:5d} | {train_loss:10.5f} | {val_loss:8.5f} | {probe_eos_rate:8.2f}% | {t_epoch:7.1f}s | {curr_ram:7.1f} | {current_lr:.2e}")
+        print(f"{epoch:5d} | {train_loss:10.5f} | {val_loss:8.5f} | {probe_eos_rate:8.2f}% | {t_epoch:7.1f}s | {curr_ram:7.1f} | {current_lr:.2e}", flush=True)
 
         # Save Latest Checkpoint
         latest_ckpt_data = {

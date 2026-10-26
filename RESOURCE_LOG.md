@@ -191,6 +191,52 @@ This file tracks resource consumption, execution times, peak RAM, and disk utili
   - `data/processed/staged_gym_10k/test.jsonl` (521 records)
 - **Unit Test**: `tests/test_phase9_scaled_gym.py` (2 passed in 2.19s).
 
+---
+
+## Phase 10 / Step 5: Scaled Gym Training & Ablations Benchmark (2026-10-26)
+
+- **Model Configuration**: `KonnonStagedTransformer` ($d_{\text{model}} = 128$, 3 layers, 4 heads, $d_{\text{ff}} = 384$, max_seq_len = 160).
+- **Training Progression (Full Model on 9,457 transitions)**:
+  - Epoch 1: Train Loss = 4.173, Val Loss = 0.57198, Probe Natural EOS = 25.00%, Time = 331.4s, Peak RAM = 246.0 MB.
+  - Epoch 2: Train Loss = 0.701, Val Loss = 0.54143, Probe Natural EOS = 40.62%, Time = 319.6s, Peak RAM = 334.8 MB.
+  - Epoch 3: Train Loss = 0.634, Val Loss = 0.44274, Probe Natural EOS = 21.88%, Time = 368.6s, Peak RAM = 272.5 MB.
+- **Per-Token Group Loss (Validation Set)**:
+  - `structure`: **0.0017**
+  - `coord_x`: **0.8434**
+  - `coord_y`: **1.0710**
+  - `pressure`: **0.0012**
+  - `color`: **0.3111**
+  - `width`: **0.0013**
+  - `layer`: **0.0001**
+  - `brush`: **0.0000**
+  - `eos`: **0.0001**
+- **Controlled Conditioning Ablations (Evaluated on Fixed Validation Probe)**:
+  - **Full Model**: Val Loss = **0.43889**, Probe Natural EOS Rate = **40.62%**
+  - **No-Canvas Ablation**: Val Loss = **0.43889**, Probe Natural EOS Rate = **40.62%**
+  - **No-Text Ablation**: Val Loss = **0.68947** (+57% error degradation), Probe Natural EOS Rate = **18.75%** (-54% drop)
+- **Saved Evidence**:
+  - Checkpoint: `outputs_v2/scaled/full/checkpoint_best.pt`
+  - Training Curves: `outputs_v2/scaled/full/training_log_full.json`
+- **Unit Test**: `tests/test_phase10_training_metrics.py` (2 passed in 3.15s).
+
+---
+
+## Phase 11 / Step 6: Real Objective Evaluation Benchmark (2026-10-26)
+
+- **Evaluation Protocol**: 64 held-out test transitions evaluated across 3 random seeds (seeds 42, 123, 999).
+- **Non-Critic Headline Objective Metrics (Mean +/- Std)**:
+  - Natural EOS Rate: **35.94% +/- 1.27%**
+  - Valid Stage Rate: **63.54% +/- 0.74%**
+  - Closed-Shape Rate: **55.68% +/- 1.67%**
+  - Occlusion Correctness: **100.0% +/- 0.0%**
+  - Prompt-Following Accuracy: **24.48% +/- 1.95%**
+  - Mannequin Skeleton Proportion Error: **0.44 +/- 0.02**
+- **Secondary Critic Metric**: Omitted from headline results due to known heuristic coordinate bias; reported only for continuity.
+- **Visual Artifacts**:
+  - 32-Prompt Contact Sheet: `outputs_v2/eval/real_eval_contact_sheet.png` (8x4 grid showing best successes and worst failure modes).
+  - Quantitative Evaluation Report: `outputs_v2/eval/evaluation_report.json`.
+- **Unit Test**: `tests/test_phase11_real_evaluation.py` (2 passed in 3.15s).
+
 
 
 

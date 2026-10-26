@@ -49,27 +49,37 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
     @classmethod
     def get_staged_model(cls):
         if cls.staged_model is None:
-            ckpt_path = PROJECT_ROOT / "outputs_v2" / "laptop" / "checkpoints" / "best.pt"
-            if not ckpt_path.exists():
-                ckpt_path = PROJECT_ROOT / "outputs_v2" / "tiny" / "checkpoints" / "best.pt"
-            if ckpt_path.exists():
+            candidates = [
+                PROJECT_ROOT / "outputs_v2" / "scaled" / "full" / "checkpoint_best.pt",
+                PROJECT_ROOT / "outputs_v2" / "laptop" / "checkpoints" / "best.pt",
+                PROJECT_ROOT / "outputs_v2" / "overfit" / "model_overfit.pt",
+                PROJECT_ROOT / "outputs_v2" / "tiny" / "checkpoints" / "best.pt",
+            ]
+            ckpt_path = None
+            for cand in candidates:
+                if cand.exists():
+                    ckpt_path = cand
+                    break
+
+            if ckpt_path and ckpt_path.exists():
                 c_data = torch.load(ckpt_path, map_location="cpu")
                 cfg = c_data.get("config", {})
-                m_cfg = cfg.get("model", {})
+                m_cfg = cfg.get("model", cfg)  # handles both flat and nested configs
+                d_m = m_cfg.get("d_model", 128)
                 cls.staged_model = KonnonStagedTransformer(
                     vocab_size=VOCAB_SIZE,
-                    d_model=m_cfg.get("d_model", 256),
-                    n_layers=m_cfg.get("n_layers", 4),
-                    n_heads=m_cfg.get("n_heads", 8),
-                    d_ff=m_cfg.get("d_ff", 768),
+                    d_model=d_m,
+                    n_layers=m_cfg.get("n_layers", 3),
+                    n_heads=m_cfg.get("n_heads", 4),
+                    d_ff=m_cfg.get("d_ff", 384),
                     max_seq_len=m_cfg.get("max_seq_len", 160),
-                    canvas_res=cfg.get("data", {}).get("canvas_res", 128),
+                    canvas_res=cfg.get("data", {}).get("canvas_res", m_cfg.get("canvas_res", 128)),
                 )
                 cls.staged_model.load_state_dict(c_data["model_state_dict"])
                 cls.staged_model.eval()
                 cls.staged_encoder = FrozenTextEncoder(
-                    model_type=cfg.get("text_encoder", {}).get("model_type", "builtin"),
-                    d_model=m_cfg.get("d_model", 256),
+                    model_type=cfg.get("text_encoder", {}).get("model_type", "builtin") if isinstance(cfg.get("text_encoder"), dict) else "builtin",
+                    d_model=d_m,
                 )
                 cls.staged_ckpt_path = ckpt_path
         return cls.staged_model, cls.staged_encoder

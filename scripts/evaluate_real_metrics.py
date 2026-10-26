@@ -262,12 +262,12 @@ def evaluate_checkpoint(
 
                 tokens = sample_stage_tokens(
                     model=model,
-                    multimodal_context=ctx,
-                    stage_idx=stage_idx,
+                    context=ctx,
                     max_tokens=max_tokens,
                     temperature=0.3,
-                    top_p=0.9,
+                    top_k=25,
                     device=device,
+                    seed=seed + idx,
                     min_stage_tokens=16,
                     length_prior_alpha=0.04,
                 )
