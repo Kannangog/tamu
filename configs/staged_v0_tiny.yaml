@@ -1,0 +1,30 @@
+# Konnon Draw Staged Transformer Model — Tiny Smoke Test Config
+experiment_name: "staged_v0_tiny"
+device: "cpu"
+
+model:
+  d_model: 128
+  n_layers: 2
+  n_heads: 4
+  d_ff: 384
+  max_seq_len: 128
+  dropout: 0.05
+
+text_encoder:
+  model_type: "builtin"
+  d_model: 128
+
+training:
+  batch_size: 16
+  learning_rate: 0.001
+  weight_decay: 0.01
+  max_epochs: 3
+  grad_clip: 1.0
+
+data:
+  num_samples: 30
+  canvas_res: 64
+  val_split: 0.15
+
+checkpoints:
+  out_dir: "outputs_v2/tiny/checkpoints"

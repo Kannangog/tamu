@@ -209,3 +209,11 @@ class FrozenTextEncoder(nn.Module):
             res = self.tower(input_ids, attention_mask)
 
         return res
+
+    def encode_text(self, texts: Union[str, List[str]], device: Optional[str] = None, max_length: int = 32) -> torch.Tensor:
+        """Returns last_hidden_state tensor of shape (B, L, D)."""
+        if device is not None and device != self.device:
+            self.to(device)
+            self.device = device
+        out = self.encode(texts, max_length=max_length)
+        return out["last_hidden_state"]

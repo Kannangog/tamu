@@ -48,4 +48,17 @@ Documents real measured weaknesses, benchmark failures, edge-case bottlenecks, a
   - *What works*: Unified single light direction (top-left) correctly drives ground cast shadow projections and directional hatching across sphere, cylinder, and cube.
   - *Weakness*: Sphere core shadow boundary uses a planar quadrilateral polygon rather than wrapping around the 3D spherical curvature.
 
+---
+
+### FAILURE-005: Phase 4 Staged Model EOS Density & High-Frequency Detailing
+- **Issue**: In all 8 evaluated prompts (`outputs_v2/eval/staged_evaluation_sheet.png`), each stage generated exactly 160 tokens without emitting an early `EOS_TOKEN`, hitting the generation limit.
+- **Root Cause**: In 5 epochs on 180 synthetic samples, cross-entropy loss converged smoothly from 53.1 down to 6.43, and the model learned token syntax (drawing valid commands without parse crashes). However, the probability mass for `EOS_TOKEN` did not overcome continuation tokens during autoregressive sampling before `max_tokens=160`.
+- **Visual Artifacts**:
+  - The model produces abstract, flowing stroke gestalts that adapt between stages (conditioning is active), but lacks crisp, recognizable outlines (e.g., recognizable bicycle spokes or realistic facial features).
+  - High-frequency details remain noisy/scribbled at this training scale ($4.6\text{M}$ params, 5 epochs, CPU synthetic gym).
+- **Resolution Path**:
+  - Requires longer pretraining (100k+ transitions, e.g. using `configs/staged_v0_full_gpu.yaml` on rented GPU).
+  - Explicit EOS logit bias or length penalty during inference sampling.
+
+
 

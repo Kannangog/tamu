@@ -1,0 +1,35 @@
+# Konnon Draw Staged Transformer Model — Full Scale GPU Config (Single A100 / RTX 4090)
+experiment_name: "staged_v0_gpu"
+device: "cuda"
+
+model:
+  d_model: 768
+  n_layers: 12
+  n_heads: 16
+  d_ff: 3072
+  max_seq_len: 256
+  dropout: 0.1
+
+text_encoder:
+  model_type: "huggingface"
+  model_name: "sentence-transformers/all-MiniLM-L6-v2"
+  d_model: 768
+
+training:
+  batch_size: 64
+  grad_accum_steps: 4
+  learning_rate: 0.0003
+  weight_decay: 0.05
+  max_epochs: 25
+  grad_clip: 1.0
+  mixed_precision: "bf16"
+
+data:
+  num_samples: 50000
+  canvas_res: 256
+  val_split: 0.05
+  num_workers: 4
+
+checkpoints:
+  out_dir: "outputs_v2/gpu/checkpoints"
+  save_every: 2

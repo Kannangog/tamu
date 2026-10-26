@@ -1,0 +1,42 @@
+[
+  {
+    "id": "mannequin_stand",
+    "group": "figures",
+    "prompt": "a full-body figure standing in a relaxed pose with natural proportions"
+  },
+  {
+    "id": "mannequin_run",
+    "group": "figures",
+    "prompt": "an athletic figure sprinting with maximum momentum and driving knees"
+  },
+  {
+    "id": "mannequin_reach",
+    "group": "figures",
+    "prompt": "a figure reaching one arm high into the air with elongated torso"
+  },
+  {
+    "id": "box_still_life",
+    "group": "objects",
+    "prompt": "a geometric cube in perspective with shaded side planes and cast shadow"
+  },
+  {
+    "id": "chair_study",
+    "group": "objects",
+    "prompt": "a wooden chair in three-quarter view with four legs and backrest"
+  },
+  {
+    "id": "bicycle_study",
+    "group": "objects",
+    "prompt": "a commuter bicycle with dual circular wheels and triangular frame"
+  },
+  {
+    "id": "house_study",
+    "group": "objects",
+    "prompt": "a rustic house with pitched triangular roof and front door"
+  },
+  {
+    "id": "oov_dragon",
+    "group": "oov",
+    "prompt": "a mythical flying dragon soaring through storm clouds"
+  }
+]

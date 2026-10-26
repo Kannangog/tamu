@@ -2,7 +2,7 @@
 import torch
 from torch import nn
 
-from .schema import ACTION_VOCAB, COORD_VOCAB
+from ..schema import ACTION_VOCAB, COORD_VOCAB
 
 
 class DrawingGRU(nn.Module):

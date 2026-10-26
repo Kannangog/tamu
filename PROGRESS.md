@@ -12,7 +12,7 @@ Tracks every phase and verification gate with real-time status and timestamps.
 | **Gate 2** | 4 scripted proof pieces in `outputs/hand_demos/` + contact sheet with honest notes | **PASSED** | 2026-10-26 17:36 | 4 pieces + 3 stage files + `gate2_contact_sheet.png` rendered; honest notes recorded in `FAILURES.md`. |
 | **Phase 3** | Synthetic Gym (staged dataset generator, pose sampler, captions) | **PASSED** | 2026-10-26 17:41 | Multi-stage transitions generator (humans + objects), rich captions, 103 tests pass. |
 | **Gate 3** | Staged dataset generated with manifests & stroke order augmentations | **PASSED** | 2026-10-26 17:41 | 180 staged transitions generated; `data/manifests/staged_gym.manifest.json` saved. |
-| **Phase 4** | Text + Canvas Conditioned Stroke Model (v0) | **TODO** | - | - |
-| **Gate 4** | Canvas encoder + text cross-attention model training & evaluation | **TODO** | - | - |
+| **Phase 4** | Text + Canvas Conditioned Stroke Model (v0) | **PASSED** | 2026-10-26 17:56 | CanvasEncoder + FrozenTextEncoder + KonnonStagedTransformer + KV-cache decoding; 107 tests passing. |
+| **Gate 4** | Canvas encoder + text cross-attention model training & evaluation | **PASSED** | 2026-10-26 17:56 | Laptop training: val loss 53.1 -> 6.43 in 5 epochs (13.7s/ep, 486MB RAM). Contact sheet saved at `outputs_v2/eval/staged_evaluation_sheet.png`. |
 | **Phase 5** | Live Web Studio (Stylus, Stages, A/B Page, Prompt Box) | **TODO** | - | - |
 | **Gate 5** | Full studio verification and A/B comparison page | **TODO** | - | - |

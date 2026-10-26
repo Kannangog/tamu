@@ -1,0 +1,30 @@
+# Konnon Draw Staged Transformer Model — Real Laptop Run
+experiment_name: "staged_v0_laptop"
+device: "cpu"
+
+model:
+  d_model: 256
+  n_layers: 4
+  n_heads: 8
+  d_ff: 768
+  max_seq_len: 160
+  dropout: 0.05
+
+text_encoder:
+  model_type: "builtin"
+  d_model: 256
+
+training:
+  batch_size: 16
+  learning_rate: 0.0008
+  weight_decay: 0.01
+  max_epochs: 5
+  grad_clip: 1.0
+
+data:
+  num_samples: 60
+  canvas_res: 128
+  val_split: 0.15
+
+checkpoints:
+  out_dir: "outputs_v2/laptop/checkpoints"

@@ -18,13 +18,9 @@ from .renderer import (
     render_document_v2,
     export_svg_v2,
     render_brush_swatches,
+    blend_layers,
 )
 from .convert_v1 import (
     v1_to_v2,
     v2_to_v1,
-)
-from .tokens import (
-    doc_to_token_sequence,
-    token_sequence_to_doc,
-    VOCAB_SIZE,
 )

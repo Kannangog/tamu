@@ -69,4 +69,41 @@ This file tracks resource consumption, execution times, peak RAM, and disk utili
   - Generation Time: **24.08s** on CPU (~0.13s per transition)
   - Peak WorkingSet64: **182.5 MB** (strictly bounded, well below 1.2 GB limit).
 
+---
+
+## Phase 4: Staged Text- and Canvas-Conditioned Stroke Model (2026-10-26)
+
+- **Test Suite**: 107 passed in 11.74s (4 new tests in `test_phase4_model.py` covering canvas encoder, multimodal context, KV-cache numerical equivalence, and multi-stage generation loop).
+- **Model Architecture**:
+  - `KonnonStagedTransformer`: 4 decoder layers, 8 attention heads, $d_{\text{model}} = 256$, $d_{\text{ff}} = 768$.
+  - Conditioning: Multimodal $[e_{\text{stage}} \,;\, H_{\text{text}} \,;\, H_{\text{canvas}}]$ cross-attention memory.
+  - Parameters: **4,593,824 trainable parameters**.
+- **Tiny Smoke Training Benchmark (`configs/staged_v0_tiny.yaml`)**:
+  - Samples: 30 drawings (90 transitions, 64×64 canvas)
+  - Epochs: 3
+  - Time: **1.2 - 1.3s / epoch** (~3.7s total)
+  - Loss trajectory: 36.5980 $\to$ 22.1370 $\to$ **18.5611**
+  - Peak WorkingSet64: **365.4 MB**
+- **Laptop Training Benchmark (`configs/staged_v0_laptop.yaml`)**:
+  - Samples: 60 drawings (180 transitions, 128×128 canvas)
+  - Split: 153 train transitions / 27 val transitions
+  - Epochs: 5
+  - Time per epoch:
+    - Epoch 1: 14.0s (Train Loss: 53.1269, Val Loss: 18.0632, RAM: 477.0 MB)
+    - Epoch 2: 13.7s (Train Loss: 13.2617, Val Loss: 10.7482, RAM: 481.4 MB)
+    - Epoch 3: 13.9s (Train Loss: 9.5677, Val Loss: 8.4326, RAM: 486.1 MB)
+    - Epoch 4: 13.7s (Train Loss: 7.7291, Val Loss: 7.0558, RAM: 486.1 MB)
+    - Epoch 5: 13.2s (Train Loss: 6.7334, Val Loss: **6.4312**, RAM: 479.3 MB)
+  - Total Training Time: **68.5s**
+  - Peak RAM RSS: **486.1 MB** (strictly bounded, well under the 1.2 GB laptop limit).
+- **Evaluation Benchmark (`outputs_v2/laptop/checkpoints/best.pt`)**:
+  - Prompts evaluated: 8 prompts across Figures, Objects, and OOV.
+  - Stages per prompt: 4 stages (`layout` $\to$ `guide` $\to$ `ink` $\to$ `shade`).
+  - Total generated tokens: 5,120 tokens (640 tokens per prompt across 4 stages).
+  - Evaluation Time: **33.6s** (~4.2s per 4-stage drawing on CPU with KV-cache).
+  - Output files:
+    - `outputs_v2/eval/staged_evaluation_sheet.png`
+    - `outputs_v2/eval/evaluation_report.json`
+
+
 
