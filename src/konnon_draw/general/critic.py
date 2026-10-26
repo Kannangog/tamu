@@ -13,7 +13,7 @@ import numpy as np
 from PIL import Image
 
 from ..renderer_v2 import render_document_v2
-from ..schema_v2 import DocumentV2, parse_color
+from ..v2.schema import DocumentV2, parse_color
 from .vocab import COLOR_NAME_MAP, COLOR_PALETTE, hex_to_palette_id
 
 

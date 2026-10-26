@@ -14,7 +14,7 @@ import torch
 import torch.nn.functional as F
 
 from ..renderer_v2 import render_document_v2
-from ..schema_v2 import DocumentV2
+from ..v2.schema import DocumentV2
 from .critic import ImageTextCritic
 from .text_encoder import FrozenTextEncoder
 from .transformer_decoder import KonnonTransformerDecoder

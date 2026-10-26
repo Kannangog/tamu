@@ -24,3 +24,20 @@ This file tracks resource consumption, execution times, peak RAM, and disk utili
   - Batch size: 32, Sequence length: 100
   - Step time: **236.12 ms/step** (0.2361 s/step)
   - Forward + backward + Adam optimizer step on CPU
+
+---
+
+## Phase 1: Hands — Stroke Language v2 & Renderer (2026-10-26)
+
+- **Test Suite**: 92 passed in 9.51s
+- **1000-Stroke Render Performance Benchmark**:
+  - Document: 1000 spline strokes (3 points each), `ink_liner`, base width 2.5px, 512×512 canvas.
+  - Initial naive loop render time: 10.52s (bottleneck: 1000 PIL $\leftrightarrow$ NumPy conversions).
+  - Optimized batched PIL draw layer render time: **1.82s** on CPU ($< 10$s target achieved).
+- **Brush Swatches Generation**:
+  - Script: `render_brush_swatches('outputs/hand/swatches.png', 1200, 800, seed=42)`
+  - Output: `outputs/hand/swatches.png` (size 1200×800)
+  - Render Time: **2.51s** (supersampled 2x)
+- **Memory Footprint**:
+  - Process RSS during 1000-stroke render: **118.4 MB** (well below 1.2 GB limit).
+

@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 from PIL import Image
 
-from .schema_v2 import (
+from .v2.schema import (
     CanvasConfigV2,
     DocumentV2,
     FillActionV2,

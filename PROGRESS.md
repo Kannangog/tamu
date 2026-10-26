@@ -6,8 +6,8 @@ Tracks every phase and verification gate with real-time status and timestamps.
 |---|---|---|---|---|
 | **Phase 0** | Audit, baseline benchmark & tracking setup | **PASSED** | 2026-10-26 15:43 | Pytest 85 passed in 21.84s; commit `d91034b`; baseline GRU 236.12 ms/step. |
 | **Gate 0** | Tests green, logs created, baseline benchmark recorded | **PASSED** | 2026-10-26 15:43 | `RESOURCE_LOG.md`, `PROGRESS.md`, `DECISIONS.md`, `FAILURES.md` initialized. |
-| **Phase 1** | Hands: Stroke Language v2 & Renderer (Depth, Brushes, Layers, AA, SVG) | **TODO** | - | - |
-| **Gate 1** | 1000-stroke render < 10s, determinism passes, 6 brush swatches verified | **TODO** | - | - |
+| **Phase 1** | Hands: Stroke Language v2 & Renderer (Depth, Brushes, Layers, AA, SVG) | **PASSED** | 2026-10-26 17:28 | Modular `v2/` package created; 6 brushes; depth-aware compositing; 92 tests passing. |
+| **Gate 1** | 1000-stroke render < 10s, determinism passes, 6 brush swatches verified | **PASSED** | 2026-10-26 17:28 | 1000 strokes in 1.82s (<10s); determinism bitwise match; `outputs/hand/swatches.png` rendered and inspected. |
 | **Phase 2** | Skill Library (mannequin3d, head_guide, linecraft, shading, effects, composition) | **TODO** | - | - |
 | **Gate 2** | 4 scripted proof pieces in `outputs/hand_demos/` + contact sheet with honest notes | **TODO** | - | - |
 | **Phase 3** | Synthetic Gym (staged dataset generator, pose sampler, captions) | **TODO** | - | - |
