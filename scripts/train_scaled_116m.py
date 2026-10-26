@@ -277,7 +277,7 @@ def train_116m_model(
                     canvas=canvas,
                     stage_idx=stage_idx,
                 )
-                logits = model(input_ids, context=context)
+                logits, _, _ = model(input_ids, context=context)
                 loss = loss_fn(logits.view(-1, VOCAB_SIZE), target_ids.view(-1))
                 loss_scaled = loss / grad_accum
 
@@ -318,7 +318,7 @@ def train_116m_model(
                 text_emb = text_encoder.encode_text(captions, device=device)
                 with torch.amp.autocast('cuda', enabled=fp16):
                     context = model.build_multimodal_context(text_embeddings=text_emb, canvas=canvas, stage_idx=stage_idx)
-                    logits = model(input_ids, context=context)
+                    logits, _, _ = model(input_ids, context=context)
                     loss = loss_fn(logits.view(-1, VOCAB_SIZE), target_ids.view(-1))
 
                 val_loss_sum += float(loss.item()) * int((target_ids != PAD_TOKEN).sum().item())
