@@ -48,12 +48,20 @@ const chkSmoothBezier = document.getElementById('chkSmoothBezier');
 const chkShowHandles = document.getElementById('chkShowHandles');
 const chkContinuous = document.getElementById('chkContinuous');
 
+// Canvas size helper ensuring fallback dimensions before first paint
+function getCanvasSize() {
+    const rect = canvas.getBoundingClientRect();
+    const w = (rect && rect.width > 0) ? rect.width : (canvas.clientWidth || 512);
+    const h = (rect && rect.height > 0) ? rect.height : (canvas.clientHeight || 512);
+    return { w, h, rect };
+}
+
 // Setup High-DPI canvas
 function setupCanvas() {
-    const rect = canvas.getBoundingClientRect();
+    const { w, h } = getCanvasSize();
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
     ctx.resetTransform();
     ctx.scale(dpr, dpr);
     ctx.lineCap = 'round';
@@ -63,6 +71,7 @@ function setupCanvas() {
     }
 }
 window.addEventListener('resize', setupCanvas);
+window.addEventListener('DOMContentLoaded', setupCanvas);
 
 // Category Selection
 categoryButtons.addEventListener('click', (e) => {
@@ -122,8 +131,7 @@ btnClear.addEventListener('click', () => {
 });
 
 function resetCanvas() {
-    const w = canvas.getBoundingClientRect().width;
-    const h = canvas.getBoundingClientRect().height;
+    const { w, h } = getCanvasSize();
     ctx.clearRect(0, 0, w, h);
     stylus.style.display = 'none';
     stylusRipple.style.display = 'none';
@@ -198,16 +206,16 @@ if (btnComplete) {
 }
 
 function getCanvasPoint(e) {
-    const rect = canvas.getBoundingClientRect();
+    const { w, h, rect } = getCanvasSize();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
-    const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
+    const x = Math.max(0, Math.min(w, clientX - rect.left));
+    const y = Math.max(0, Math.min(h, clientY - rect.top));
     return {
         px: x,
         py: y,
-        normX: Number((x / rect.width).toFixed(4)),
-        normY: Number((y / rect.height).toFixed(4))
+        normX: Number((x / w).toFixed(4)),
+        normY: Number((y / h).toFixed(4))
     };
 }
 
@@ -307,8 +315,6 @@ async function startNewDrawing(prefixActions = null) {
         penStateLabel.textContent = `ERROR: ${err.message}`;
         btnPlayPause.disabled = false;
     }
-        btnPlayPause.disabled = false;
-    }
 }
 
 // Play / Pause toggle
@@ -365,8 +371,7 @@ btnStep.addEventListener('click', () => {
 // Replay current drawing
 btnReplay.addEventListener('click', () => {
     stopAnimation();
-    const w = canvas.getBoundingClientRect().width;
-    const h = canvas.getBoundingClientRect().height;
+    const { w, h } = getCanvasSize();
     ctx.clearRect(0, 0, w, h);
     currentIndex = 0;
     currentPaths = [];
@@ -400,8 +405,7 @@ function tick() {
 
 // Re-render canvas up to specified step
 function redrawCanvasUpTo(limitIdx) {
-    const w = canvas.getBoundingClientRect().width;
-    const h = canvas.getBoundingClientRect().height;
+    const { w, h } = getCanvasSize();
     ctx.clearRect(0, 0, w, h);
 
     // Reconstruct paths up to limitIdx
@@ -516,8 +520,7 @@ function renderPathOnCanvas(points, useBezier, showHandles) {
 
 function executeStep(idx) {
     const a = currentActions[idx];
-    const w = canvas.getBoundingClientRect().width;
-    const h = canvas.getBoundingClientRect().height;
+    const { w, h } = getCanvasSize();
 
     // Stylus positioning
     if (a.x !== undefined && a.y !== undefined) {
