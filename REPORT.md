@@ -2,8 +2,8 @@
 
 **Date**: 2026-10-26  
 **Hardware Profile**: Windows Laptop, AMD Ryzen 5 5000-series (6 cores / 12 threads), 8 GB RAM, CPU-only execution  
-**Test Suite**: 49 passed in 4.34s  
-**Active Baseline Commit**: `410aa28`  
+**Test Suite**: 85 passed in 21.84s  
+**Active Baseline Commit**: `d91034b`  
 
 ---
 

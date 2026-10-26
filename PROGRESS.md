@@ -1,0 +1,18 @@
+# Progress & Gate Tracker
+
+Tracks every phase and verification gate with real-time status and timestamps.
+
+| Phase / Gate | Description | Status | Timestamp | Evidence / Notes |
+|---|---|---|---|---|
+| **Phase 0** | Audit, baseline benchmark & tracking setup | **PASSED** | 2026-10-26 15:43 | Pytest 85 passed in 21.84s; commit `d91034b`; baseline GRU 236.12 ms/step. |
+| **Gate 0** | Tests green, logs created, baseline benchmark recorded | **PASSED** | 2026-10-26 15:43 | `RESOURCE_LOG.md`, `PROGRESS.md`, `DECISIONS.md`, `FAILURES.md` initialized. |
+| **Phase 1** | Hands: Stroke Language v2 & Renderer (Depth, Brushes, Layers, AA, SVG) | **TODO** | - | - |
+| **Gate 1** | 1000-stroke render < 10s, determinism passes, 6 brush swatches verified | **TODO** | - | - |
+| **Phase 2** | Skill Library (mannequin3d, head_guide, linecraft, shading, effects, composition) | **TODO** | - | - |
+| **Gate 2** | 4 scripted proof pieces in `outputs/hand_demos/` + contact sheet with honest notes | **TODO** | - | - |
+| **Phase 3** | Synthetic Gym (staged dataset generator, pose sampler, captions) | **TODO** | - | - |
+| **Gate 3** | Staged dataset generated with manifests & stroke order augmentations | **TODO** | - | - |
+| **Phase 4** | Text + Canvas Conditioned Stroke Model (v0) | **TODO** | - | - |
+| **Gate 4** | Canvas encoder + text cross-attention model training & evaluation | **TODO** | - | - |
+| **Phase 5** | Live Web Studio (Stylus, Stages, A/B Page, Prompt Box) | **TODO** | - | - |
+| **Gate 5** | Full studio verification and A/B comparison page | **TODO** | - | - |
