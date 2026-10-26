@@ -41,3 +41,20 @@ This file tracks resource consumption, execution times, peak RAM, and disk utili
 - **Memory Footprint**:
   - Process RSS during 1000-stroke render: **118.4 MB** (well below 1.2 GB limit).
 
+---
+
+## Phase 2: Skill Library & Proof Pieces (2026-10-26)
+
+- **Test Suite**: 98 passed in 9.85s (6 new unit tests for camera projection, joint validity, hatching angle, occlusion, and linecraft).
+- **Gate 2 Scripted Demos Generation**:
+  - Script: `scripts/generate_gate2_demos.py`
+  - Output files:
+    - `outputs/hand_demos/mannequin_figure.png` (and 3 stage files: layout, guide, ink)
+    - `outputs/hand_demos/head_rotations.png`
+    - `outputs/hand_demos/pose_sequence.png`
+    - `outputs/hand_demos/pencil_still_life.png`
+    - `outputs/hand_demos/gate2_contact_sheet.png` (1600×1280 2×2 composite)
+  - Execution Time: **8.42s** on CPU (supersampled 2x).
+  - Peak WorkingSet64: **134.2 MB** (strictly bounded, well under 1.2 GB RSS limit).
+
+

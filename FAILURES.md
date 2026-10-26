@@ -32,3 +32,20 @@ Documents real measured weaknesses, benchmark failures, edge-case bottlenecks, a
 - **Weakness 2 (Charcoal Grain Directionality)**: Charcoal particles are scattered with isotropic 2D Gaussian jitter rather than directional shearing along the stroke normal.
 - **Weakness 3 (Marker Nib Angle)**: Marker stroke caps are rounded rather than angled chisel slant marks.
 
+---
+
+### FAILURE-004: Gate 2 Scripted Demos Honest Assessment (`outputs/hand_demos/gate2_contact_sheet.png`)
+- **Piece 1 (Articulated Mannequin)**:
+  - *What works*: 3 distinct 3D poses (stand, reach, run) rendered in 3 separate stages (layout wireframe, guide capsules, ink contours) with camera perspective and depth ordering.
+  - *Weakness*: Limb cylinders are rendered as parallel boundary pairs without closed joint end-caps, leaving small visual gaps at elbow and knee intersections.
+- **Piece 2 (Loomis Head Rotations)**:
+  - *What works*: Accurate geometric foreshortening across 3 rotations (front yaw 0°, 3/4 yaw 35°, profile yaw 80°); jaw line and nose wedge turn convincingly with perspective.
+  - *Weakness*: Cranium circle and brow guide lines are drawn in thin pencil lines that are low-contrast on high-DPI displays.
+- **Piece 3 (Dynamic Pose Sequence)**:
+  - *What works*: Proportions are strictly preserved across 4 kinematic frames (stand $\to$ walk $\to$ run $\to$ crouch) using the adult 7.5-head archetype.
+  - *Weakness*: Limbs terminate at circular ankle/wrist joints; missing articulated foot and hand silhouette blocks.
+- **Piece 4 (Pencil Still Life)**:
+  - *What works*: Unified single light direction (top-left) correctly drives ground cast shadow projections and directional hatching across sphere, cylinder, and cube.
+  - *Weakness*: Sphere core shadow boundary uses a planar quadrilateral polygon rather than wrapping around the 3D spherical curvature.
+
+
