@@ -59,6 +59,7 @@ class StagedTransformerDecoderLayer(nn.Module):
         )
 
         self.drop = nn.Dropout(dropout)
+        self.dropout = dropout
 
     def forward(
         self,
@@ -71,7 +72,7 @@ class StagedTransformerDecoderLayer(nn.Module):
         B, L_dec, D = x.shape
 
         # ---------------------------------------------------------
-        # 1. Causal Self-Attention (with KV cache)
+        # 1. Causal Self-Attention (with KV cache & Memory-Efficient SDPA)
         # ---------------------------------------------------------
         norm_x = self.ln_self(x)
         q = self.q_self(norm_x).view(B, L_dec, self.n_heads, self.head_dim).transpose(1, 2)
@@ -84,16 +85,16 @@ class StagedTransformerDecoderLayer(nn.Module):
             v = torch.cat([past_v, v], dim=2)
         new_self_kv = (k, v)
 
-        # Scaled dot-product attention
-        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        if causal_mask is not None and self_kv_cache is None:
-            scores = scores + causal_mask[:L_dec, :L_dec]
-        attn = F.softmax(scores, dim=-1)
-        self_out = torch.matmul(attn, v).transpose(1, 2).contiguous().view(B, L_dec, D)
+        drop_p = self.dropout if self.training else 0.0
+        if self_kv_cache is None:
+            self_out = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=drop_p)
+        else:
+            self_out = F.scaled_dot_product_attention(q, k, v, is_causal=False)
+        self_out = self_out.transpose(1, 2).contiguous().view(B, L_dec, D)
         x = x + self.drop(self.out_self(self_out))
 
         # ---------------------------------------------------------
-        # 2. Multimodal Cross-Attention (with precomputed KV cache)
+        # 2. Multimodal Cross-Attention (with precomputed KV cache & Memory-Efficient SDPA)
         # ---------------------------------------------------------
         norm_x = self.ln_cross(x)
         q_c = self.q_cross(norm_x).view(B, L_dec, self.n_heads, self.head_dim).transpose(1, 2)
@@ -106,9 +107,8 @@ class StagedTransformerDecoderLayer(nn.Module):
             v_c = self.v_cross(context).view(B, L_ctx, self.n_heads, self.head_dim).transpose(1, 2)
         new_cross_kv = (k_c, v_c)
 
-        cross_scores = torch.matmul(q_c, k_c.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        cross_attn = F.softmax(cross_scores, dim=-1)
-        cross_out = torch.matmul(cross_attn, v_c).transpose(1, 2).contiguous().view(B, L_dec, D)
+        cross_out = F.scaled_dot_product_attention(q_c, k_c, v_c, is_causal=False, dropout_p=drop_p)
+        cross_out = cross_out.transpose(1, 2).contiguous().view(B, L_dec, D)
         x = x + self.drop(self.out_cross(cross_out))
 
         # ---------------------------------------------------------

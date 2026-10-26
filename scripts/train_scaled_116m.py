@@ -137,8 +137,8 @@ def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
 def train_116m_model(
     data_dir: str = "data/processed/quickdraw_staged_50k",
     out_dir: str = "outputs_v2/scaled_116m",
-    batch_size: int = 32,
-    grad_accum: int = 4,
+    batch_size: int = 16,
+    grad_accum: int = 8,
     epochs: int = 10,
     lr: float = 3e-4,
     eos_weight: float = 3.5,
@@ -401,8 +401,8 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="data/processed/quickdraw_staged_50k")
     parser.add_argument("--out_dir", default="outputs_v2/scaled_116m")
     parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--grad_accum", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--grad_accum", type=int, default=8)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--device", default=None)
     parser.add_argument("--fp16", action="store_true", default=None)
