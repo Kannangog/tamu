@@ -1,0 +1,36 @@
+# Konnon Draw General — Small Config (Laptop real run, limited vocabulary)
+experiment_name: "general_small"
+stage: 3  # Joint Synthetic Primitives + QuickDraw Human Categories
+device: "cpu"
+
+model:
+  d_model: 256
+  n_layers: 4
+  n_heads: 8
+  d_ff: 768
+  max_seq_len: 192
+  dropout: 0.05
+
+text_encoder:
+  model_type: "builtin"
+  d_model: 256
+
+training:
+  batch_size: 16
+  learning_rate: 0.0007
+  min_lr: 0.00007
+  weight_decay: 0.01
+  max_epochs: 8
+  grad_clip: 1.0
+  grad_accum_steps: 1
+  mixed_precision: "no"
+
+data:
+  num_synthetic: 800
+  max_quickdraw_per_class: 100
+  val_split: 0.15
+  num_workers: 0
+
+checkpoints:
+  out_dir: "outputs_general/small/checkpoints"
+  save_every: 1

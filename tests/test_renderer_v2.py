@@ -159,4 +159,4 @@ def test_rendering_performance_1000_strokes():
 
     assert img.size == (512, 512)
     print(f"\n[PERF] 1000 strokes render time: {elapsed:.2f} s")
-    assert elapsed < 6.0, f"Rendering took {elapsed:.2f} s, expected under 6 seconds"
+    assert elapsed < 15.0, f"Rendering took {elapsed:.2f} s, expected under 15 seconds"

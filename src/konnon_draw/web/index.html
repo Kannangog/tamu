@@ -770,6 +770,12 @@
     <main>
         <!-- Canvas Stage -->
         <section class="stage-card">
+            <!-- Konnon Draw General: Text Prompt Bar -->
+            <div class="prompt-bar-container" style="display: flex; gap: 10px; width: 100%;">
+                <input type="text" id="textPromptInput" class="seed-input" style="flex: 1; font-size: 14px; padding: 10px 14px;" placeholder="Enter drawing prompt, e.g.: a red circle above a blue square / a simple bicycle" value="a red circle above a blue square">
+                <button class="btn btn-primary" id="btnGenerateText" style="padding: 10px 18px; font-weight: 700; white-space: nowrap;">✨ Generate from Text</button>
+            </div>
+
             <div class="category-selector" id="categoryButtons">
                 <button class="category-btn active" data-cat="bicycle">🚲 Bicycle</button>
                 <button class="category-btn" data-cat="car">🚗 Car</button>

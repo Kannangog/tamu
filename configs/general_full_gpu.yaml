@@ -1,0 +1,36 @@
+# Konnon Draw General — Full GPU Scale-Up Config (Single A100 / RTX 4090)
+experiment_name: "general_full_gpu"
+stage: 3  # Full scale curriculum
+device: "cuda"
+
+model:
+  d_model: 768
+  n_layers: 16
+  n_heads: 12
+  d_ff: 3072
+  max_seq_len: 512
+  dropout: 0.1
+
+text_encoder:
+  model_type: "sentence-transformers/all-MiniLM-L6-v2"
+  d_model: 768
+
+training:
+  batch_size: 64
+  learning_rate: 0.0003
+  min_lr: 0.00003
+  weight_decay: 0.01
+  max_epochs: 50
+  grad_clip: 1.0
+  grad_accum_steps: 4  # Effective batch size = 256
+  mixed_precision: "bfloat16"
+
+data:
+  num_synthetic: 20000
+  max_quickdraw_per_class: 3000
+  val_split: 0.05
+  num_workers: 4
+
+checkpoints:
+  out_dir: "outputs_general/full_gpu/checkpoints"
+  save_every: 2

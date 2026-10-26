@@ -209,6 +209,106 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
             self.send_json(response_data)
             return
 
+        if path == "/api/generate_text":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(content_length)
+
+            try:
+                payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+            except Exception:
+                payload = {}
+
+            prompt = payload.get("prompt", "a red circle above a blue square")
+            seed = int(payload.get("seed", 42))
+            temperature = float(payload.get("temperature", 0.5))
+            top_k = int(payload.get("top_k", 25))
+            prefix = payload.get("prefix", None)
+
+            # Lazy load general model
+            if not hasattr(DrawingStudioHandler, "general_model") or DrawingStudioHandler.general_model is None:
+                from .general.text_encoder import FrozenTextEncoder
+                from .general.transformer_decoder import KonnonTransformerDecoder
+                from .general.vocab import VOCAB_SIZE
+
+                small_ckpt = PROJECT_ROOT / "outputs_general" / "small" / "checkpoints" / "best.pt"
+                tiny_ckpt = PROJECT_ROOT / "outputs_general" / "tiny" / "checkpoints" / "best.pt"
+                chosen_ckpt = small_ckpt if small_ckpt.exists() else tiny_ckpt
+
+                if chosen_ckpt.exists():
+                    c_data = torch.load(chosen_ckpt, map_location="cpu")
+                    cfg = c_data.get("config", {})
+                    m_cfg = cfg.get("model", {})
+                    g_model = KonnonTransformerDecoder(
+                        vocab_size=VOCAB_SIZE,
+                        d_model=m_cfg.get("d_model", 256),
+                        n_layers=m_cfg.get("n_layers", 4),
+                        n_heads=m_cfg.get("n_heads", 8),
+                        d_ff=m_cfg.get("d_ff", 768),
+                        max_seq_len=m_cfg.get("max_seq_len", 192),
+                    )
+                    g_model.load_state_dict(c_data["model_state_dict"])
+                    g_model.eval()
+                    DrawingStudioHandler.general_model = g_model
+                    DrawingStudioHandler.general_encoder = FrozenTextEncoder(
+                        model_type=cfg.get("text_encoder", {}).get("model_type", "builtin"),
+                        d_model=m_cfg.get("d_model", 256),
+                    )
+
+            if hasattr(DrawingStudioHandler, "general_model") and DrawingStudioHandler.general_model is not None:
+                from .general.sampling_general import generate_from_prompt, generate_with_prefix_prompt
+                from .renderer_v2 import export_svg_v2
+                from .schema_v2 import v1_to_v2
+
+                if prefix and isinstance(prefix, list) and len(prefix) > 0:
+                    pref_doc = v1_to_v2(prefix)
+                    gen_res = generate_with_prefix_prompt(
+                        model=DrawingStudioHandler.general_model,
+                        text_encoder=DrawingStudioHandler.general_encoder,
+                        prompt=prompt,
+                        prefix_doc=pref_doc,
+                        max_tokens=160,
+                        temperature=temperature,
+                        top_k=top_k,
+                        seed=seed,
+                    )
+                else:
+                    gen_res = generate_from_prompt(
+                        model=DrawingStudioHandler.general_model,
+                        text_encoder=DrawingStudioHandler.general_encoder,
+                        prompt=prompt,
+                        max_tokens=160,
+                        temperature=temperature,
+                        top_k=top_k,
+                        seed=seed,
+                    )
+
+                doc = gen_res["doc"]
+                svg = export_svg_v2(doc, width=512, height=512)
+
+                v1_actions = []
+                for cmd in doc.commands:
+                    if getattr(cmd, "type", "") == "stroke":
+                        pts = getattr(cmd, "points", [])
+                        if len(pts) >= 2:
+                            v1_actions.append({"type": "MOVE", "x": pts[0].x, "y": pts[0].y})
+                            for p in pts[1:]:
+                                v1_actions.append({"type": "LINE", "x": p.x, "y": p.y})
+                            v1_actions.append({"type": "PEN_UP"})
+                if v1_actions:
+                    v1_actions.append({"type": "END"})
+
+                response_data = {
+                    "prompt": prompt,
+                    "seed": seed,
+                    "temperature": temperature,
+                    "n_tokens": gen_res["n_tokens"],
+                    "actions": v1_actions,
+                    "svg": svg,
+                    "bezier_strokes": actions_to_bezier_segments(v1_actions, width=512, height=512) if v1_actions else [],
+                }
+                self.send_json(response_data)
+                return
+
         self.send_error(HTTPStatus.NOT_FOUND, "Endpoint Not Found")
 
     def serve_file(self, file_path: Path, content_type: str):

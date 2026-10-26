@@ -201,7 +201,12 @@ if (btnComplete) {
         }
         const prefixToPass = [...userPrefixActions];
         exitSketchMode();
-        startNewDrawing(prefixToPass);
+        const promptInput = document.getElementById('textPromptInput');
+        if (promptInput && promptInput.value.trim().length > 0) {
+            startNewDrawingFromPrompt(promptInput.value.trim(), prefixToPass);
+        } else {
+            startNewDrawing(prefixToPass);
+        }
     });
 }
 
@@ -315,6 +320,65 @@ async function startNewDrawing(prefixActions = null) {
         penStateLabel.textContent = `ERROR: ${err.message}`;
         btnPlayPause.disabled = false;
     }
+}
+
+// Fetch drawing from Transformer General text-to-vector API
+async function startNewDrawingFromPrompt(prompt, prefixActions = null) {
+    stopAnimation();
+    resetCanvas();
+
+    penStateLabel.textContent = prefixActions ? 'TRANSFORMER COMPLETING PREFIX WITH PROMPT...' : 'TRANSFORMER INFERENCE FROM PROMPT...';
+    btnPlayPause.disabled = true;
+
+    try {
+        const payload = {
+            prompt: prompt,
+            seed: parseInt(seedInput.value, 10) || 42,
+            temperature: parseFloat(tempSlider.value),
+            top_k: topkSlider.value === '0' ? 25 : parseInt(topkSlider.value, 10),
+        };
+        if (prefixActions && prefixActions.length > 0) {
+            payload.prefix = prefixActions;
+        }
+
+        const res = await fetch('/api/generate_text', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+            throw new Error(`API error: ${res.statusText}`);
+        }
+
+        const data = await res.json();
+        currentActions = data.actions;
+        currentIndex = 0;
+        lastSvgContent = data.svg;
+
+        tokenFeed.innerHTML = '';
+        tokenCountBadge.textContent = `${currentActions.length} tokens`;
+
+        btnPlayPause.disabled = false;
+        btnReplay.disabled = false;
+        btnDownloadSvg.disabled = false;
+        btnDownloadJson.disabled = false;
+
+        playDrawing();
+    } catch (err) {
+        console.error(err);
+        penStateLabel.textContent = `ERROR: ${err.message}`;
+        btnPlayPause.disabled = false;
+    }
+}
+
+const btnGenerateText = document.getElementById('btnGenerateText');
+const textPromptInput = document.getElementById('textPromptInput');
+if (btnGenerateText) {
+    btnGenerateText.addEventListener('click', () => {
+        const prompt = textPromptInput ? textPromptInput.value.trim() : 'a red circle above a blue square';
+        startNewDrawingFromPrompt(prompt);
+    });
 }
 
 // Play / Pause toggle

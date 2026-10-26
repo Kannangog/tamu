@@ -1,0 +1,154 @@
+{
+  "checkpoint": "outputs_general/small/checkpoints/best.pt",
+  "summary": {
+    "primitives": {
+      "mean_critic_score": 0.7722,
+      "num_prompts": 4
+    },
+    "counts": {
+      "mean_critic_score": 0.7721,
+      "num_prompts": 3
+    },
+    "spatial": {
+      "mean_critic_score": 0.7724,
+      "num_prompts": 3
+    },
+    "categories": {
+      "mean_critic_score": 0.9999,
+      "num_prompts": 6
+    },
+    "oov": {
+      "mean_critic_score": 0.9996,
+      "num_prompts": 2
+    },
+    "overall_mean_critic_score": 0.8734
+  },
+  "results": [
+    {
+      "prompt": "a red circle",
+      "group": "primitives",
+      "critic_score": 0.7724,
+      "rule_score": 0.65,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "a blue square",
+      "group": "primitives",
+      "critic_score": 0.7721,
+      "rule_score": 0.65,
+      "n_tokens": 202
+    },
+    {
+      "prompt": "a green triangle",
+      "group": "primitives",
+      "critic_score": 0.7722,
+      "rule_score": 0.65,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "a yellow star",
+      "group": "primitives",
+      "critic_score": 0.7722,
+      "rule_score": 0.65,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "two red circles",
+      "group": "counts",
+      "critic_score": 0.772,
+      "rule_score": 0.65,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "three blue squares",
+      "group": "counts",
+      "critic_score": 0.772,
+      "rule_score": 0.65,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "two green stars",
+      "group": "counts",
+      "critic_score": 0.7722,
+      "rule_score": 0.65,
+      "n_tokens": 210
+    },
+    {
+      "prompt": "a red circle above a blue square",
+      "group": "spatial",
+      "critic_score": 0.7723,
+      "rule_score": 0.65,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "a yellow star left of a green triangle",
+      "group": "spatial",
+      "critic_score": 0.7724,
+      "rule_score": 0.65,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "a blue square below a red circle",
+      "group": "spatial",
+      "critic_score": 0.7725,
+      "rule_score": 0.65,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "a drawing of a bicycle",
+      "group": "categories",
+      "critic_score": 0.9998,
+      "rule_score": 1.0,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "a simple sketch of a car",
+      "group": "categories",
+      "critic_score": 0.9997,
+      "rule_score": 1.0,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "a drawing of a chair",
+      "group": "categories",
+      "critic_score": 1.0,
+      "rule_score": 1.0,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "a drawing of a house",
+      "group": "categories",
+      "critic_score": 0.9998,
+      "rule_score": 1.0,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "a drawing of a table",
+      "group": "categories",
+      "critic_score": 0.9999,
+      "rule_score": 1.0,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "a drawing of a bed",
+      "group": "categories",
+      "critic_score": 0.9999,
+      "rule_score": 1.0,
+      "n_tokens": 256
+    },
+    {
+      "prompt": "an astronaut floating in space",
+      "group": "oov",
+      "critic_score": 0.9999,
+      "rule_score": 1.0,
+      "n_tokens": 254
+    },
+    {
+      "prompt": "a cybernetic dragon breathing fire",
+      "group": "oov",
+      "critic_score": 0.9994,
+      "rule_score": 1.0,
+      "n_tokens": 254
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "project": "konnon_draw_general",
+  "description": "Multi-stage dataset corpus for text-to-vector drawing",
+  "access_date": "2026-10-26",
+  "sources": [
+    {
+      "name": "Google Quick, Draw!",
+      "license": "CC BY 4.0",
+      "attribution": "Google Creative Lab / Quick, Draw! Dataset",
+      "url": "https://github.com/googlecreativelab/quickdraw-dataset",
+      "role": "Stage 2 category pretraining and human stroke dynamics"
+    },
+    {
+      "name": "Artist Hand Synthetic Primitives",
+      "license": "MIT (Project Native)",
+      "attribution": "Konnon Draw Project",
+      "role": "Stage 1 verified shape/color/spatial composition curriculum"
+    }
+  ]
+}
