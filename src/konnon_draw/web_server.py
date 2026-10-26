@@ -91,6 +91,31 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
             self.send_json(items)
             return
 
+        if path == "/api/hand_demos":
+            demos_dir = PROJECT_ROOT / "outputs" / "hand_demos"
+            items = []
+            if demos_dir.exists():
+                demos_meta = [
+                    ("bicycle_ink_study", "Bicycle Ink Study", "Fine ink liner with light-directed line weights, spokes, chainring, and ground hatching shadow.", "Ink Liner"),
+                    ("pencil_still_life", "Pencil Still Life", "3 classical geometric forms with core shading, graphite tooth grain, and projected cast shadows.", "Pencil"),
+                    ("color_landscape", "Color Landscape", "Atmospheric perspective gradient sky, 3-tier depth mountain ridges, lake reflections, and pine trees.", "Color Wash"),
+                    ("charcoal_portrait", "Charcoal Portrait Study", "Loomis proportion guides, head construction, high-friction charcoal grain, and chiaroscuro value masses.", "Charcoal"),
+                ]
+                for piece_id, title, desc, medium in demos_meta:
+                    png_file = demos_dir / f"{piece_id}.png"
+                    svg_file = demos_dir / f"{piece_id}.svg"
+                    if png_file.exists():
+                        items.append({
+                            "id": piece_id,
+                            "title": title,
+                            "description": desc,
+                            "medium": medium,
+                            "png_url": f"/outputs/hand_demos/{piece_id}.png",
+                            "svg_url": f"/outputs/hand_demos/{piece_id}.svg",
+                        })
+            self.send_json(items)
+            return
+
         # Serve static assets from outputs/
         if path.startswith("/outputs/"):
             rel_path = path.lstrip("/")

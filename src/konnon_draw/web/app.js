@@ -671,7 +671,68 @@ async function loadShowcase() {
     }
 }
 
+// Load Hand v2 Demos
+async function loadHandDemos() {
+    try {
+        const res = await fetch('/api/hand_demos');
+        if (!res.ok) return;
+        const items = await res.json();
+        const grid = document.getElementById('handDemosGrid');
+        if (!grid) return;
+
+        grid.innerHTML = '';
+        items.forEach(it => {
+            const card = document.createElement('div');
+            card.className = 'hand-demo-card';
+            card.innerHTML = `
+                <div class="hand-demo-thumb">
+                    <img src="${it.png_url}" alt="${it.title}">
+                </div>
+                <div class="hand-demo-info">
+                    <div class="hand-demo-badge">${it.medium}</div>
+                    <div class="hand-demo-card-title">${it.title}</div>
+                    <div class="hand-demo-desc">${it.description}</div>
+                </div>
+            `;
+            card.addEventListener('click', () => {
+                openHandDemoModal(it);
+            });
+            grid.appendChild(card);
+        });
+    } catch (err) {
+        console.warn('Could not load hand demos', err);
+    }
+}
+
+function openHandDemoModal(demo) {
+    const modal = document.getElementById('handDemoModal');
+    if (!modal) return;
+    document.getElementById('modalTitle').textContent = demo.title;
+    document.getElementById('modalImg').src = demo.png_url;
+    document.getElementById('modalMedium').textContent = demo.medium;
+    document.getElementById('modalDesc').textContent = demo.description;
+    document.getElementById('modalDownloadPng').href = demo.png_url;
+    document.getElementById('modalDownloadSvg').href = demo.svg_url;
+    modal.classList.add('active');
+}
+
+const modalCloseBtn = document.getElementById('modalCloseBtn');
+if (modalCloseBtn) {
+    modalCloseBtn.addEventListener('click', () => {
+        const m = document.getElementById('handDemoModal');
+        if (m) m.classList.remove('active');
+    });
+}
+
+const handDemoModal = document.getElementById('handDemoModal');
+if (handDemoModal) {
+    handDemoModal.addEventListener('click', (e) => {
+        if (e.target === handDemoModal) handDemoModal.classList.remove('active');
+    });
+}
+
 // Initialize on page load
 setupCanvas();
 loadShowcase();
+loadHandDemos();
 startNewDrawing();

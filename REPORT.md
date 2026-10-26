@@ -192,3 +192,109 @@ All 52 unit tests pass cleanly:
 1. **Combined Run 4 (`hidden_dim=384` + `class_skip=True`)**: Train a hybrid checkpoint combining the 725k capacity of Run 2 with the direct category skip-connections of Run 3.
 2. **Curated House Data Filtering**: Filter out drawings with detached peripheral strokes (trees, suns) during QuickDraw ingestion to focus exclusively on clean roof and wall line geometry.
 3. **Stroke Reordering Augmentation**: Human drawings in Quick, Draw! are drawn in arbitrary order (some draw wheels first, others frame first). Training with stroke permutation would improve collaborative drawing robustness regardless of which stroke the user draws first.
+
+---
+
+## 8. Artist's Hand Layer (v2) — Decoupling Hand from Brain
+
+### 8.1 Core Principle & Architecture
+The v1 model drew simple doodles on a 64×64 quantized grid with a single-width black stroke. To enable true artistic generation, the physical instrument (the **Hand**) has been completely decoupled from the neural policy (the **Brain**).
+
+```
+                      +---------------------------------------+
+                      |       ARTIST'S BRAIN (Future ML)      |
+                      |  Coarse-to-fine sequence generation:  |
+                      |  Composition -> Guides -> Contours    |
+                      |  -> Shading -> Details -> Color       |
+                      +---------------------------------------+
+                                          |
+                                          v (Discrete v2 Tokens)
+                      +---------------------------------------+
+                      |         ENCODING / DECODING           |
+                      |  256/1024 spatial, 16 pressure,       |
+                      |  16 width, palette index tokens       |
+                      +---------------------------------------+
+                                          |
+                                          v (DocumentV2 Action Language)
++-----------------------------------------------------------------------------------+
+|                           ARTIST'S HAND LAYER (konnon_draw)                       |
+|                                                                                   |
+|  * High-Res Canvas: 1024x1024 default, continuous [0, 1] normalized coords         |
+|  * 6 Brush Models: ink_liner, pencil, charcoal, airbrush, marker, watercolor_wash |
+|  * Variable Width: Catmull-Rom ribbons, calligraphic taper, pressure sensitivity |
+|  * Region Fills: flat, linear/radial gradient, directional hatching, stipple     |
+|  * Layer Stack: ordered layers with blend modes (normal, multiply, screen, over)  |
+|  * Deterministic Engine: CPU execution via Pillow + NumPy, 100% seeded            |
++-----------------------------------------------------------------------------------+
+                                          |
+                                          +-------------------+
+                                          |                   |
+                                          v                   v
+                                     PNG (1024×1024)      SVG Vector
+```
+
+### 8.2 Component Overview
+- **Action Language v2 (`src/konnon_draw/schema_v2.py`)**:
+  - `DocumentV2`, `CanvasConfigV2`, `LayerV2`, `StrokeActionV2`, `FillActionV2`.
+  - Supports continuous coordinates, brush models, blend modes, tapering, and fills.
+  - Strict validator (`validate_document_v2`) and backward-compatible converter (`v1_to_v2`).
+- **Brush & Rendering Engine (`src/konnon_draw/renderer_v2.py`)**:
+  - `render_document_v2(doc, width, height, supersample, seed)`: 2x supersampled rasterizer.
+  - `export_svg_v2(doc, width, height)`: Clean standalone SVG export.
+  - Optimized CPU performance: 1,000 variable-width spline strokes render in **4.45s** on CPU.
+  - Strictly deterministic: identical random seeds produce pixel-exact identical output.
+- **Artist Skill Library (`src/konnon_draw/artist_skills.py`)**:
+  - Geometry: `make_ellipse`, `make_arc`, `make_wobbly_contour`, `make_symmetric_stroke`, `make_perspective_grid`, `make_proportion_guides`.
+  - Line craft: `apply_line_weight_by_light` (modulates pressure along curve normals based on light direction), `make_sketchy_lines`.
+  - Value & form: `generate_directional_hatching`, `generate_cast_shadow_polygon`, `generate_stipple_shading`.
+  - Color & depth: `generate_palette_harmony`, `apply_atmospheric_perspective`, `make_gradient_sky`.
+- **Token Scheme & Learnability (`src/konnon_draw/encoding_v2.py`)**:
+  - High-precision round-trip serialization between `DocumentV2` and discrete token sequences.
+  - `quickdraw_to_v2`: Converts human doodles to v2 with calligraphic pressure and layer separation.
+  - Extensions: `stroke_order_augmentation`, `complete_prefix_v2`, and `compute_critic_score`.
+
+### 8.3 Proof of Capability: 4 Scripted Pieces (NO ML)
+Four scripted artworks were produced under `outputs/hand_demos/` to prove the Hand's expressive capabilities before any neural training:
+
+| Piece | Medium & Techniques | Output Files | Key Demonstration |
+|---|---|---|---|
+| **1. Bicycle Ink Study** | Ink Liner | `bicycle_ink_study.png`<br>`bicycle_ink_study.svg` | Light-directed line weights (thick shadow undersides, thin top tubes), spokes, chainring, directional hatching ground shadow |
+| **2. Pencil Still Life** | 2B/4B Graphite Pencil | `pencil_still_life.png`<br>`pencil_still_life.svg` | Sphere, cylinder, cube in 1-point perspective; graphite paper tooth grain; core crescent shadow; reflected bounce light; cast shadows |
+| **3. Color Landscape** | Watercolor Wash & Marker | `color_landscape.png`<br>`color_landscape.svg` | Multi-tier atmospheric depth perspective (depth $0.9 \to 0.5 \to 0.1$), linear gradient dusk sky, radial sun glow, lake reflections, pine trees |
+| **4. Charcoal Portrait** | Charcoal & White Chalk | `charcoal_portrait.png`<br>`charcoal_portrait.svg` | Loomis proportion guides (brow, nose, chin), rough high-friction charcoal dispersion, chiaroscuro Rembrandt form value masses |
+
+- **Contact Sheet**: `outputs/hand_demos/contact_sheet.png` (2048×2048 2×2 composite view).
+- **Interactive Web Studio**: Integrated `/api/hand_demos` view in the live drawing studio (`http://127.0.0.1:8080`) allowing full-resolution PNG viewing, SVG markup inspection, and downloads.
+
+### 8.4 Self-Critical Assessment: Strengths & Weaknesses
+- **What the Hand Did Well**:
+  1. Broke completely free of the 64×64 pixelated doodle constraint: output is high-resolution, nuanced, layered, and physically grounded.
+  2. Paper grain and texture realism: pencil and charcoal brushes successfully simulate physical medium interaction on cold-press paper.
+  3. Grounding and mass: directional hatching ground shadows immediately remove the "floating" feeling of procedural doodles.
+  4. Depth cues: atmospheric perspective color blending produces genuine distance and spatial hierarchy.
+- **What the Hand Cannot Do Yet**:
+  1. *Dynamic line occlusion*: When a foreground object crosses a background line (e.g. bike frame across spokes), the hand requires explicit layer partitioning rather than automatic clipping.
+  2. *3D cross-contour hatching*: Shading on curved surfaces uses 2D directional hatching rather than wrapping around 3D surface geometry.
+  3. *Wet-on-wet fluid physics*: Watercolor washes feature drying edge rings, but lack Navier-Stokes pigment migration when two wet regions bleed into each other.
+  4. *Anatomical blending*: Organic facial anatomy (e.g. cheek muscles) requires smoother tonal transitions than 2D polygonal value masses provide.
+
+### 8.5 Learnability Proof: Overfitting Sanity Test (`scripts/overfit_demo.py`)
+To prove that neural agents can easily control this hand language:
+- Encoded a scripted shaded sphere piece into vector action tokens.
+- Trained a compact PyTorch GRU model (~50k parameters) on CPU for 80 epochs.
+- Training loss dropped from `0.31888` to **`0.004749`** in 5 seconds.
+- Sampled autoregressively from the model, decoded into `DocumentV2`, and rendered with `renderer_v2`.
+- **Reconstruction Output**: `outputs/hand_demos/overfit_reconstruction.png`.
+- **Critic Perceptual Similarity Score**: **`0.9482 / 1.0000`** against ground truth.
+
+### 8.6 What a Future Model Needs to Master This Hand
+To advance from a scripted hand to an autonomous neural artist:
+1. **Data**:
+   - Multi-layer vector drawings with preserved construction lines (e.g. digital art project files, vector illustration traces, CAD sketches).
+   - Augmented Quick, Draw! data converted via `quickdraw_to_v2` with randomized stroke-order permutations.
+2. **Model Scale & Architecture**:
+   - A 10M–50M parameter Transformer decoder (e.g., Llama/GPT architecture with causal attention) replacing the recurrent GRU.
+   - Sequence context length of 2,048–4,096 tokens to accommodate multi-stroke compositions with layers, attributes, and fills.
+3. **Training Objective**:
+   - Stage 1: Next-token autoregressive cross-entropy on coarse-to-fine sequences (Layers $\to$ Underdrawing $\to$ Contours $\to$ Shading $\to$ Highlights).
+   - Stage 2: Reinforcement learning (PPO / DPO) using the `compute_critic_score` raster similarity hook to reward aesthetic balance, closure, and lighting consistency.
