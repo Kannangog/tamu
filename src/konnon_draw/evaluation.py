@@ -1,435 +1,172 @@
+"""Per-category evaluation: validity, completion, diversity, novelty, kNN recognizability, export, baseline."""
 import argparse
 import csv
 import json
-import math
-import random
-import subprocess
-import xml.etree.ElementTree as ET
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
 
-import torch
+import numpy as np
+from PIL import Image, ImageDraw
 
-from .model import DrawingGRU
-from .renderer import render_svg
-from .sampling import generate_sequence
-from .schema import Action, validate_actions
-
-
-def compute_stroke_statistics(actions: List[dict]) -> dict:
-    action_count = len(actions)
-    path_count = 0
-    pen_up_count = 0
-    total_length = 0.0
-
-    curr_x, curr_y = None, None
-    for a in actions:
-        kind = a["type"]
-        if kind == "MOVE":
-            path_count += 1
-            curr_x, curr_y = a["x"], a["y"]
-        elif kind == "LINE":
-            if curr_x is not None and curr_y is not None:
-                dx = a["x"] - curr_x
-                dy = a["y"] - curr_y
-                total_length += math.hypot(dx, dy)
-            curr_x, curr_y = a["x"], a["y"]
-        elif kind == "PEN_UP":
-            pen_up_count += 1
-            curr_x, curr_y = None, None
-
-    pen_up_ratio = pen_up_count / max(1, action_count)
-    return {
-        "action_count": action_count,
-        "path_count": path_count,
-        "pen_up_ratio": pen_up_ratio,
-        "total_path_length": total_length,
-    }
+from .encoding import load_jsonl
+from .raster import draw_tile, rasterize
+from .renderer import actions_to_paths, render_svg
+from .sampling import generate, random_baseline, save_sample
+from .schema import is_valid
 
 
-def generate_random_baseline(num_samples: int = 64, max_len: int = 64, seed: int = 999) -> Tuple[float, float]:
-    """Generate completely unconstrained random action sequences to test baseline pass rate."""
-    random.seed(seed)
-    valid_count = 0
-    ended_count = 0
+def stroke_stats(actions):
+    paths = actions_to_paths(actions)
+    length = sum(float(np.hypot(b[0] - a[0], b[1] - a[1])) for p in paths for a, b in zip(p, p[1:]))
+    n = len(actions)
+    return {"action_count": n, "path_count": len(paths), "path_length": length,
+            "pen_up_ratio": sum(a["type"] == "PEN_UP" for a in actions) / n}
 
-    actions_types = ["MOVE", "LINE", "PEN_UP", "END"]
 
-    for _ in range(num_samples):
-        length = random.randint(3, max_len)
-        sample = []
-        for j in range(length):
-            kind = random.choice(actions_types)
-            if kind in ("MOVE", "LINE"):
-                sample.append({"type": kind, "x": random.random(), "y": random.random()})
-            elif kind == "PEN_UP":
-                sample.append({"type": "PEN_UP"})
+def contact_sheet(by_class, path, cols=8, tile=128):
+    """One labelled block per category. Red border = invalid, orange = length-limit fallback."""
+    band, rows_h, y = 22, [], 0
+    for _, res in by_class:
+        rows_h.append(band + ((len(res) + cols - 1) // cols) * tile)
+    sheet = Image.new("RGB", (cols * tile, sum(rows_h)), "white")
+    d = ImageDraw.Draw(sheet)
+    for (name, res), h in zip(by_class, rows_h):
+        d.text((6, y + 5), name, fill="#111827")
+        for i, r in enumerate(res):
+            x0, y0 = (i % cols) * tile, y + band + (i // cols) * tile
+            color = "#d1d5db"
+            if is_valid(r["actions"]):
+                sheet.paste(draw_tile(r["actions"], tile - 4).convert("RGB"), (x0 + 2, y0 + 2))
+                if r["repaired"]:
+                    color = "#f59e0b"
             else:
-                sample.append({"type": "END"})
-                break
-        if sample[-1]["type"] != "END":
-            sample.append({"type": "END"})
-
-        try:
-            validate_actions(sample)
-            render_svg(sample)
-            valid_count += 1
-        except Exception:
-            pass
-
-        if len(sample) < max_len and sample[-1]["type"] == "END":
-            ended_count += 1
-
-    return valid_count / num_samples, ended_count / num_samples
+                color = "#ef4444"
+            d.rectangle([x0, y0, x0 + tile - 1, y0 + tile - 1], outline=color, width=1)
+        y += h
+    sheet.save(path)
 
 
-def get_git_commit() -> str:
-    try:
-        res = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
-        return res.stdout.strip() if res.returncode == 0 else "unknown"
-    except Exception:
-        return "none"
+def _dists(q, bank):
+    """Pairwise L2 via the dot-product identity (memory-safe: no (N, M, D) tensor)."""
+    d2 = (q ** 2).sum(1)[:, None] + (bank ** 2).sum(1)[None, :] - 2.0 * q @ bank.T
+    return np.sqrt(np.maximum(d2, 0.0))
 
 
-def run_evaluation_gates(
-    data_path: str = "data/processed/toy_drawings.jsonl",
-    checkpoint_path: str = "outputs/checkpoints/best_model.pt",
-    samples_dir: str = "outputs/samples",
-    log_dir: str = "logs",
-    docs_dir: str = "docs",
-    num_eval_samples: int = 64,
-) -> Dict[str, Any]:
-    report = {}
-    timestamp = datetime.now().isoformat()
-    git_commit = get_git_commit()
+def _pairwise_mean(mat):
+    if len(mat) < 2:
+        return 0.0
+    d = _dists(mat, mat)
+    return float(d.sum() / (len(mat) * (len(mat) - 1)))
 
-    # -------------------------------------------------------------
-    # Gate 0: Data & Renderer audit
-    # -------------------------------------------------------------
-    print("[Gate 0] Auditing dataset and SVG renderer...")
-    val_examples = []
-    gate_0_errors = []
-    total_audited = 0
-    if Path(data_path).exists():
-        with open(data_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                ex = json.loads(line)
-                total_audited += 1
-                try:
-                    validate_actions(ex["actions"])
-                    svg = render_svg(ex["actions"])
-                    # Check XML parsing
-                    ET.fromstring(svg)
-                except Exception as err:
-                    gate_0_errors.append(f"Example {ex.get('id')}: {err}")
-    gate_0_pass = (len(gate_0_errors) == 0) and (total_audited > 0)
-    report["gate_0"] = {
-        "pass": gate_0_pass,
-        "total_audited": total_audited,
-        "errors": gate_0_errors[:5],
+
+def _knn_labels(q, bank, bank_labels, k=5):
+    idx = np.argsort(_dists(q, bank), axis=1)[:, :k]
+    return [int(np.bincount(bank_labels[r]).argmax()) for r in idx]
+
+
+def evaluate(checkpoint, data, out_dir, n_per_class=16, seed=1000, temperature=0.4, log_path="logs/train_log.csv"):
+    from .training import load_model
+    out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
+    model, ckpt = load_model(checkpoint)
+    classes, max_len = ckpt["classes"], ckpt["config"]["max_len"]
+    examples = {e["id"]: e for e in load_jsonl(data)}
+    split_file = Path(ckpt["config"]["out_dir"]) / "split.json"
+    split = json.loads(split_file.read_text())
+    train_ex = [examples[i] for i in split["train_ids"]]
+    val_ex = [examples[i] for i in split["val_ids"]]
+    audit_ok = sum(is_valid(e["actions"]) and bool(render_svg(e["actions"])) for e in examples.values())
+
+    train_vecs = np.stack([rasterize(e["actions"]) for e in train_ex])
+    train_lab = np.array([classes.index(e["category"]) for e in train_ex])
+    val_vecs = np.stack([rasterize(e["actions"]) for e in val_ex])
+    val_lab = np.array([classes.index(e["category"]) for e in val_ex])
+    ref_knn = float(np.mean(np.array(_knn_labels(val_vecs, train_vecs, train_lab)) == val_lab))
+    val_nn = float(_dists(val_vecs, train_vecs).min(1).mean())
+
+    per_class, by_class, all_res, consistent, n_valid_total = {}, [], [], 0, 0
+    for ci, name in enumerate(classes):
+        res = [generate(model, ci, seed + i, max_len, temperature) for i in range(n_per_class)]
+        for i, r in enumerate(res):
+            r["category"] = name; r["valid"] = is_valid(r["actions"])
+            save_sample(out_dir / "samples", f"{name}_{i:03d}", r)
+            if r["valid"]:
+                saved = json.loads((out_dir / "samples" / f"{name}_{i:03d}.json").read_text())
+                consistent += (out_dir / "samples" / f"{name}_{i:03d}.svg").read_text() == render_svg(saved["actions"])
+        valid = [r for r in res if r["valid"]]
+        n_valid_total += len(valid)
+        vecs = np.stack([rasterize(r["actions"]) for r in valid]) if valid else np.zeros((0, train_vecs.shape[1]))
+        stats = [stroke_stats(r["actions"]) for r in valid]
+        entry = {
+            "validity": len(valid) / n_per_class,
+            "natural_end": sum(r["natural_end"] for r in res) / n_per_class,
+            "fallback_used": sum(r["repaired"] for r in res) / n_per_class,
+            "mean_actions": float(np.mean([s["action_count"] for s in stats])) if stats else 0.0,
+            "mean_paths": float(np.mean([s["path_count"] for s in stats])) if stats else 0.0,
+            "diversity": _pairwise_mean(vecs),
+        }
+        if len(vecs):
+            entry["knn_recognized_as_requested"] = float(np.mean(np.array(_knn_labels(vecs, train_vecs, train_lab)) == ci))
+            entry["nn_dist_to_train"] = float(_dists(vecs, train_vecs).min(1).mean())
+        mask = train_lab == ci
+        entry["reference_train_diversity"] = _pairwise_mean(train_vecs[mask][:n_per_class])
+        per_class[name] = entry
+        by_class.append((name, res)); all_res += res
+    contact_sheet(by_class, out_dir / "contact_sheet.png")
+
+    n_all = len(all_res)
+    base = sum(is_valid(random_baseline(seed + i, max_len)) for i in range(n_all)) / n_all
+    nan_free = None
+    if Path(log_path).exists():
+        rows = list(csv.DictReader(open(log_path, encoding="utf-8")))
+        nan_free = all("nan" not in r["train_loss"].lower() and "nan" not in r["val_loss"].lower() for r in rows)
+    recog = [e["knn_recognized_as_requested"] for e in per_class.values() if "knn_recognized_as_requested" in e]
+    m = {
+        "checkpoint": str(checkpoint), "epoch": ckpt["epoch"], "classes": classes, "temperature": temperature,
+        "samples_per_class": n_per_class, "first_seed": seed, "best_val_loss": ckpt["val_loss"],
+        "render_validity_rate": n_valid_total / n_all,
+        "completion_rate_natural_end": sum(r["natural_end"] for r in all_res) / n_all,
+        "random_baseline_validity_rate": base,
+        "knn_recognizability_generated": float(np.mean(recog)) if recog else 0.0,
+        "knn_recognizability_reference_heldout_real": ref_knn,
+        "heldout_to_train_nn_dist": val_nn, "per_class": per_class,
+        "gates": {
+            "0_data_renderer": f"{audit_ok}/{len(examples)} examples parse and render (run pytest for unit tests)",
+            "1_training": "no NaN in log" if nan_free else ("NaN found" if nan_free is False else "log not found"),
+            "2_generation": "PASS" if n_valid_total / n_all > base and n_valid_total / n_all > 0.9 else "REVIEW",
+            "3_generalization": "held-out split: val loss, kNN reference and NN distance reported; unseen categories not tested",
+            "4_export": f"{consistent}/{n_valid_total} saved JSON re-render to identical SVG",
+            "5_governance": "manual review required before any public release",
+        },
+        "notes": ("kNN recognizability = nearest-neighbour vote of rasterised samples against training drawings; "
+                  "a proxy for 'does it look like the requested category', not a human rating."),
     }
-
-    # -------------------------------------------------------------
-    # Gate 1: Training verification
-    # -------------------------------------------------------------
-    print("[Gate 1] Checking training convergence and NaN check...")
-    training_log = Path(log_dir) / "training_log.csv"
-    gate_1_pass = False
-    has_nan = False
-    epochs_trained = 0
-    first_loss = None
-    last_val_loss = None
-
-    if training_log.exists():
-        with open(training_log, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                epochs_trained += 1
-                t_loss = float(row["train_loss"])
-                v_loss = float(row["val_loss"])
-                if math.isnan(t_loss) or math.isnan(v_loss):
-                    has_nan = True
-                if first_loss is None:
-                    first_loss = t_loss
-                last_val_loss = v_loss
-        gate_1_pass = (epochs_trained > 0) and not has_nan and (last_val_loss is not None) and (last_val_loss < first_loss)
-
-    report["gate_1"] = {
-        "pass": gate_1_pass,
-        "epochs_trained": epochs_trained,
-        "first_train_loss": first_loss,
-        "final_val_loss": last_val_loss,
-        "has_nan": has_nan,
-    }
-
-    # -------------------------------------------------------------
-    # Gate 2: Generation vs Baseline
-    # -------------------------------------------------------------
-    print("[Gate 2] Evaluating generation quality vs random baseline...")
-    # Load model
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    config = checkpoint.get("config", {"hidden_dim": 128, "embedding_dim": 32})
-    model = DrawingGRU(
-        embedding_dim=config.get("embedding_dim", 32),
-        hidden_dim=config.get("hidden_dim", 128),
-    )
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.eval()
-
-    model_valid_count = 0
-    model_ended_count = 0
-    sample_stats_list = []
-
-    for i in range(num_eval_samples):
-        actions, is_valid, err = generate_sequence(model, seed=1000 + i)
-        if is_valid:
-            try:
-                render_svg(actions)
-                model_valid_count += 1
-            except Exception:
-                pass
-        if len(actions) < 64 and actions[-1]["type"] == "END":
-            model_ended_count += 1
-        sample_stats_list.append(compute_stroke_statistics(actions))
-
-    model_valid_rate = model_valid_count / num_eval_samples
-    model_completion_rate = model_ended_count / num_eval_samples
-
-    rand_valid_rate, rand_completion_rate = generate_random_baseline(num_samples=num_eval_samples)
-
-    gate_2_pass = model_valid_rate > rand_valid_rate and model_valid_rate >= 0.90
-    report["gate_2"] = {
-        "pass": gate_2_pass,
-        "model_valid_rate": model_valid_rate,
-        "model_completion_rate": model_completion_rate,
-        "baseline_valid_rate": rand_valid_rate,
-        "baseline_completion_rate": rand_completion_rate,
-    }
-
-    # Compute stroke averages
-    avg_actions = sum(s["action_count"] for s in sample_stats_list) / len(sample_stats_list)
-    avg_paths = sum(s["path_count"] for s in sample_stats_list) / len(sample_stats_list)
-    avg_length = sum(s["total_path_length"] for s in sample_stats_list) / len(sample_stats_list)
-    avg_penup_ratio = sum(s["pen_up_ratio"] for s in sample_stats_list) / len(sample_stats_list)
-
-    report["stroke_stats"] = {
-        "avg_actions": round(avg_actions, 2),
-        "avg_paths": round(avg_paths, 2),
-        "avg_length": round(avg_length, 4),
-        "avg_penup_ratio": round(avg_penup_ratio, 4),
-    }
-
-    # -------------------------------------------------------------
-    # Gate 3: Generalization (Held-out validation check)
-    # -------------------------------------------------------------
-    print("[Gate 3] Checking held-out generalization across categories...")
-    category_eval = {}
-    if Path(data_path).exists():
-        with open(data_path, "r", encoding="utf-8") as f:
-            all_records = [json.loads(line) for line in f if line.strip()]
-
-        # Fixed split matching training (last 20%)
-        indices = list(range(len(all_records)))
-        random.seed(config.get("seed", 42))
-        random.shuffle(indices)
-        val_indices = indices[int(0.8 * len(indices)):]
-        val_records = [all_records[i] for i in val_indices]
-
-        # Group by category
-        from collections import defaultdict
-        from .training import DrawingDataset, collate_drawings, evaluate_loss
-        from torch.utils.data import DataLoader
-
-        cat_groups = defaultdict(list)
-        for r in val_records:
-            cat_groups[r.get("category", "unknown")].append(r)
-
-        for cat, items in cat_groups.items():
-            cat_ds = DrawingDataset(items, max_len=config.get("max_len", 128))
-            cat_loader = DataLoader(cat_ds, batch_size=8, shuffle=False, collate_fn=collate_drawings)
-            c_loss, c_act, c_coord = evaluate_loss(model, cat_loader, torch.device("cpu"))
-            category_eval[cat] = {
-                "count": len(items),
-                "loss": round(c_loss, 4),
-                "act_loss": round(c_act, 4),
-                "coord_loss": round(c_coord, 4),
-            }
-
-    gate_3_pass = len(category_eval) >= 4 and all(v["loss"] < 5.0 for v in category_eval.values())
-    report["gate_3"] = {
-        "pass": gate_3_pass,
-        "val_loss": last_val_loss,
-        "categories": category_eval,
-    }
-
-    # -------------------------------------------------------------
-    # Gate 4: Export Consistency & Editability
-    # -------------------------------------------------------------
-    print("[Gate 4] Verifying SVG export consistency & editability...")
-    exported_svgs = list(Path(samples_dir).glob("*.svg"))
-    editable_count = 0
-    for svg_p in exported_svgs[:10]:
-        try:
-            tree = ET.parse(svg_p)
-            root = tree.getroot()
-            # Test editability: inject a test group/attribute and re-serialize
-            for path_elem in root.findall("{http://www.w3.org/2000/svg}path"):
-                path_elem.set("data-edited", "true")
-            editable_count += 1
-        except Exception:
-            pass
-
-    gate_4_pass = (len(exported_svgs) > 0) and (editable_count == min(10, len(exported_svgs)))
-    report["gate_4"] = {
-        "pass": gate_4_pass,
-        "total_svgs": len(exported_svgs),
-        "audited_editable": editable_count,
-    }
-
-    # -------------------------------------------------------------
-    # Gate 5: Governance
-    # -------------------------------------------------------------
-    print("[Gate 5] Verifying governance checklist...")
-    gate_5_pass = True
-    report["gate_5"] = {
-        "pass": gate_5_pass,
-        "dataset_source": "Konnon synthetic dataset v0.1 + Google QuickDraw documented intake checklist",
-        "license_status": "Synthetic CC0-equivalent; QuickDraw Apache 2.0 / CC-BY 4.0 compliant",
-        "intended_use": "Educational stroke sequence prototype v0.1",
-    }
-
-    # -------------------------------------------------------------
-    # Write experiment log
-    # -------------------------------------------------------------
-    exp_log = Path(log_dir) / "experiment_log.csv"
-    fieldnames = [
-        "date",
-        "git_commit",
-        "dataset_version",
-        "seed",
-        "model",
-        "hidden_dim",
-        "batch_size",
-        "max_len",
-        "learning_rate",
-        "epoch",
-        "train_loss",
-        "val_loss",
-        "valid_rate",
-        "completion_rate",
-        "notes",
-    ]
-    file_exists = exp_log.exists()
-    with open(exp_log, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow({
-            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "git_commit": git_commit,
-            "dataset_version": "toy_drawings_v0.1",
-            "seed": config.get("seed", 42),
-            "model": "DrawingGRU",
-            "hidden_dim": config.get("hidden_dim", 128),
-            "batch_size": config.get("batch_size", 8),
-            "max_len": config.get("max_len", 128),
-            "learning_rate": config.get("lr", 0.001),
-            "epoch": epochs_trained,
-            "train_loss": round(checkpoint.get("train_loss", 0.0), 4),
-            "val_loss": round(checkpoint.get("val_loss", 0.0), 4),
-            "valid_rate": round(model_valid_rate, 4),
-            "completion_rate": round(model_completion_rate, 4),
-            "notes": "v0.1 baseline prototype release gate pass",
-        })
-
-    # -------------------------------------------------------------
-    # Write docs/evaluation_report.md
-    # -------------------------------------------------------------
-    Path(docs_dir).mkdir(parents=True, exist_ok=True)
-    report_md_path = Path(docs_dir) / "evaluation_report.md"
-
-    category_md_rows = "\n".join([
-        f"| `{cat}` | {stats['count']} | {stats['loss']} | {stats['act_loss']} | {stats['coord_loss']} |"
-        for cat, stats in category_eval.items()
-    ])
-
-    md_content = f"""# Konnon Drawing Model v0.1 — Evaluation & Release Gates Report
-
-Generated on: {timestamp}  
-Git commit: `{git_commit}`  
-Model: `DrawingGRU(hidden_dim={config.get('hidden_dim', 128)}, embedding_dim={config.get('embedding_dim', 32)})`
-
-## 1. Release Gates Summary
-
-| Gate | Description | Pass Condition | Status |
-|---|---|---|---|
-| **Gate 0** | Data / Renderer | All audited examples parse and render | {"PASS" if gate_0_pass else "FAIL"} |
-| **Gate 1** | Training | Runs without NaNs and validates convergence | {"PASS" if gate_1_pass else "FAIL"} |
-| **Gate 2** | Generation | Structurally valid and beats random baseline | {"PASS" if gate_2_pass else "FAIL"} |
-| **Gate 3** | Generalization | Held-out examples & categories evaluated separately | {"PASS" if gate_3_pass else "FAIL"} |
-| **Gate 4** | Export | SVG exports cleanly and elements are editable | {"PASS" if gate_4_pass else "FAIL"} |
-| **Gate 5** | Governance | Datasets, licenses, and intended use verified | {"PASS" if gate_5_pass else "FAIL"} |
-
-## 2. Quantitative Generation Metrics
-
-- **Model Render Validity Rate**: {model_valid_rate:.1%} (Random baseline: {rand_valid_rate:.1%})
-- **Model Natural Completion Rate**: {model_completion_rate:.1%} (Random baseline: {rand_completion_rate:.1%})
-- **Training Epochs**: {epochs_trained}
-- **Initial Training Loss**: {first_loss:.4f}
-- **Final Validation Loss**: {last_val_loss:.4f}
-
-## 3. Held-out Category Generalization (Gate 3)
-
-| Category | Examples | Total Loss | Action Loss | Coordinate Loss |
-|---|---|---|---|---|
-{category_md_rows}
-
-## 4. Stroke Statistics
-
-- **Average Actions per Drawing**: {report['stroke_stats']['avg_actions']}
-- **Average Paths per Drawing**: {report['stroke_stats']['avg_paths']}
-- **Average Path Length**: {report['stroke_stats']['avg_length']} (canvas units)
-- **Pen-Up Ratio**: {report['stroke_stats']['avg_penup_ratio']:.1%}
-
-## 5. Strengths and Limitations
-
-### Strengths
-- Deterministic, standards-compliant SVG rendering decoupled from model inference.
-- Quantized categorical tokenization allows strict vocabulary control without coordinate drift.
-- Constrained autoregressive decoding ensures illegal token transitions (such as unanchored LINE) are prevented.
-- Complete reproducible pipeline tested on CPU laptop architecture.
-
-### Known Limitations (v0.1)
-- Coordinate quantization (32 bins) causes coarse lines on complex shapes.
-- Model is unconditional next-action prediction; prompt-conditioned drawing requires stage B/C conditioning.
-- Does not generalize to arbitrary natural language or anime illustration without conditioned hierarchical Transformer and expanded illustration dataset.
-"""
-    report_md_path.write_text(md_content, encoding="utf-8")
-    print(f"Evaluation report written to {report_md_path}")
-    return report
+    (out_dir / "report.json").write_text(json.dumps(m, indent=2), encoding="utf-8")
+    lines = ["# Konnon Drawing Model - evaluation", "",
+             f"- checkpoint: {checkpoint} (epoch {ckpt['epoch']}), temperature {temperature}, {n_per_class} samples/class",
+             f"- render validity: {m['render_validity_rate']:.3f} (random baseline {base:.3f})",
+             f"- natural completion: {m['completion_rate_natural_end']:.3f}",
+             f"- kNN recognizability: generated {m['knn_recognizability_generated']:.3f} vs held-out real {ref_knn:.3f}",
+             "", "| category | valid | recognized | diversity (ref) | NN dist |", "|---|---|---|---|---|"]
+    for k, e in per_class.items():
+        lines.append(f"| {k} | {e['validity']:.2f} | {e.get('knn_recognized_as_requested', 0):.2f} | "
+                     f"{e['diversity']:.2f} ({e['reference_train_diversity']:.2f}) | {e.get('nn_dist_to_train', 0):.2f} |")
+    lines += ["", "## Gates"] + [f"- {k}: {v}" for k, v in m["gates"].items()]
+    lines += ["", f"Note: {m['notes']}", "Contact sheet: contact_sheet.png (red = invalid, orange = length-limit fallback)."]
+    (out_dir / "report.md").write_text("\n".join(lines), encoding="utf-8")
+    return m
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Evaluate Konnon Drawing Model release gates.")
-    parser.add_argument("--data", default="data/processed/toy_drawings.jsonl", help="Dataset path")
-    parser.add_argument("--checkpoint", default="outputs/checkpoints/best_model.pt", help="Checkpoint path")
-    parser.add_argument("--samples-dir", default="outputs/samples", help="Samples directory")
-    parser.add_argument("--log-dir", default="logs", help="Logs directory")
-    parser.add_argument("--docs-dir", default="docs", help="Docs directory")
-    parser.add_argument("--num-samples", type=int, default=64, help="Samples to evaluate")
-    args = parser.parse_args()
-
-    run_evaluation_gates(
-        data_path=args.data,
-        checkpoint_path=args.checkpoint,
-        samples_dir=args.samples_dir,
-        log_dir=args.log_dir,
-        docs_dir=args.docs_dir,
-        num_eval_samples=args.num_samples,
-    )
+def main(argv=None):
+    p = argparse.ArgumentParser(description="Evaluate a checkpoint")
+    p.add_argument("--checkpoint", default="outputs/checkpoints/best.pt")
+    p.add_argument("--data", default="data/processed/objects.jsonl")
+    p.add_argument("--out", default="outputs/eval")
+    p.add_argument("--n", type=int, default=16, help="samples per category")
+    p.add_argument("--seed", type=int, default=1000)
+    p.add_argument("--temperature", type=float, default=0.4)
+    p.add_argument("--log", default="logs/train_log.csv")
+    a = p.parse_args(argv)
+    evaluate(a.checkpoint, a.data, a.out, a.n, a.seed, a.temperature, a.log)
+    print(Path(a.out, "report.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

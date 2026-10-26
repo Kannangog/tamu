@@ -1,311 +1,220 @@
+"""Teacher-forced next-action training with masked loss, checkpoints and an experiment log."""
 import argparse
 import csv
 import json
 import os
 import random
+import subprocess
+import time
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
 
+import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
 
-from .encoding import NO_COORD, encode_one
-from .model import ACTION_VOCAB, COORD_VOCAB, DrawingGRU
-from .schema import Action
+from .encoding import class_list, collate, dataset_version, encode_examples, load_jsonl
+from .model import DrawingGRU
+from .sampling import generate, save_sample
+from .schema import COORD_BINS, SCHEMA_VERSION, Action, is_valid
 
-
-class DrawingDataset(Dataset):
-    def __init__(self, examples: List[dict], max_len: int = 128):
-        self.max_len = max_len
-        self.encoded_samples = []
-        for ex in examples:
-            ids, xs, ys = encode_one(ex["actions"])
-            if len(ids) < 2:
-                continue
-            # Truncate if exceeds max_len
-            ids = ids[:max_len]
-            xs = xs[:max_len]
-            ys = ys[:max_len]
-            self.encoded_samples.append((ids, xs, ys))
-
-    def __len__(self) -> int:
-        return len(self.encoded_samples)
-
-    def __getitem__(self, idx: int):
-        ids, xs, ys = self.encoded_samples[idx]
-        # input is 0..T-1, target is 1..T
-        in_ids = ids[:-1]
-        in_xs = xs[:-1]
-        in_ys = ys[:-1]
-
-        tgt_ids = ids[1:]
-        tgt_xs = xs[1:]
-        tgt_ys = ys[1:]
-
-        return (
-            torch.tensor(in_ids, dtype=torch.long),
-            torch.tensor(in_xs, dtype=torch.long),
-            torch.tensor(in_ys, dtype=torch.long),
-            torch.tensor(tgt_ids, dtype=torch.long),
-            torch.tensor(tgt_xs, dtype=torch.long),
-            torch.tensor(tgt_ys, dtype=torch.long),
-        )
+LOG_FIELDS = ["date", "git_commit", "dataset_version", "seed", "model", "hidden_dim", "batch_size",
+              "max_len", "learning_rate", "epoch", "train_loss", "val_loss", "train_action_loss",
+              "train_coord_loss", "val_action_loss", "val_coord_loss", "val_action_acc",
+              "valid_rate", "completion_rate", "epoch_seconds", "notes"]
 
 
-def collate_drawings(batch):
-    in_ids, in_xs, in_ys, tgt_ids, tgt_xs, tgt_ys = zip(*batch)
-    max_in_len = max(x.size(0) for x in in_ids)
-
-    b_in_ids = torch.full((len(batch), max_in_len), Action.PAD, dtype=torch.long)
-    b_in_xs = torch.full((len(batch), max_in_len), NO_COORD, dtype=torch.long)
-    b_in_ys = torch.full((len(batch), max_in_len), NO_COORD, dtype=torch.long)
-
-    b_tgt_ids = torch.full((len(batch), max_in_len), Action.PAD, dtype=torch.long)
-    b_tgt_xs = torch.full((len(batch), max_in_len), NO_COORD, dtype=torch.long)
-    b_tgt_ys = torch.full((len(batch), max_in_len), NO_COORD, dtype=torch.long)
-
-    for i in range(len(batch)):
-        l = in_ids[i].size(0)
-        b_in_ids[i, :l] = in_ids[i]
-        b_in_xs[i, :l] = in_xs[i]
-        b_in_ys[i, :l] = in_ys[i]
-
-        b_tgt_ids[i, :l] = tgt_ids[i]
-        b_tgt_xs[i, :l] = tgt_xs[i]
-        b_tgt_ys[i, :l] = tgt_ys[i]
-
-    return b_in_ids, b_in_xs, b_in_ys, b_tgt_ids, b_tgt_xs, b_tgt_ys
+@dataclass
+class TrainConfig:
+    data: str = "data/processed/objects.jsonl"
+    out_dir: str = "outputs"
+    log_dir: str = "logs"
+    seed: int = 1
+    val_frac: float = 0.15
+    embedding_dim: int = 48
+    hidden_dim: int = 256
+    batch_size: int = 32
+    max_len: int = 160
+    lr: float = 2e-3
+    lr_final_frac: float = 0.1
+    coord_smooth: float = 1.0
+    weight_decay: float = 1e-2
+    clip: float = 1.0
+    epochs: int = 40
+    checkpoint_every: int = 5
+    sample_every: int = 5
+    eval_samples: int = 4  # per class
+    notes: str = ""
 
 
-def compute_loss(
-    action_logits: torch.Tensor,
-    x_logits: torch.Tensor,
-    y_logits: torch.Tensor,
-    tgt_ids: torch.Tensor,
-    tgt_xs: torch.Tensor,
-    tgt_ys: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    # Action loss ignores Action.PAD
-    act_loss = F.cross_entropy(
-        action_logits.view(-1, ACTION_VOCAB),
-        tgt_ids.view(-1),
-        ignore_index=Action.PAD,
-    )
+def set_seed(seed):
+    random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
 
-    # Coordinate loss calculated only where target action is MOVE (1) or LINE (2)
-    coord_mask = (tgt_ids == Action.MOVE) | (tgt_ids == Action.LINE)
-    if coord_mask.sum() > 0:
-        x_loss = F.cross_entropy(x_logits[coord_mask], tgt_xs[coord_mask])
-        y_loss = F.cross_entropy(y_logits[coord_mask], tgt_ys[coord_mask])
-        coord_loss = (x_loss + y_loss) / 2.0
+
+def git_commit():
+    try:
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
+                                       stderr=subprocess.DEVNULL, text=True).strip()
+    except Exception:
+        return "n/a"
+
+
+def split_items(items, val_frac, seed):
+    """Split by example with a fixed seed; validation is never used for gradient updates."""
+    order = list(range(len(items)))
+    random.Random(seed).shuffle(order)
+    n_val = max(1, int(round(len(items) * val_frac)))
+    val = [items[i] for i in order[:n_val]]
+    train = [items[i] for i in order[n_val:]]
+    return train, val
+
+
+def soft_coord_ce(logits, targets, sigma):
+    """Cross-entropy against a Gaussian over neighbouring bins, so near-misses are penalised less."""
+    if sigma <= 0:
+        return F.cross_entropy(logits, targets)
+    bins = torch.arange(COORD_BINS, dtype=torch.float32)
+    q = torch.exp(-0.5 * ((bins[None, :] - targets[:, None].float()) / sigma) ** 2)
+    q = q / q.sum(1, keepdim=True)
+    return -(q * F.log_softmax(logits, -1)[:, :COORD_BINS]).sum(1).mean()
+
+
+def batch_loss(model, batch, coord_smooth=1.0):
+    """Masked losses. Action loss ignores PAD; coord loss only where the target is MOVE/LINE."""
+    in_a, in_x, in_y, t_a, t_x, t_y, cls = batch
+    a_log, x_log, h, _ = model(in_a, in_x, in_y, cls)
+    y_log = model.predict_y(h, t_x)  # y head conditioned on the true x (teacher forcing)
+    valid = t_a != int(Action.PAD)
+    coord = (t_a == int(Action.MOVE)) | (t_a == int(Action.LINE))
+    action_loss = F.cross_entropy(a_log[valid], t_a[valid])
+    n_coord = int(coord.sum())
+    if n_coord:
+        coord_loss = 0.5 * (soft_coord_ce(x_log[coord], t_x[coord], coord_smooth) + soft_coord_ce(y_log[coord], t_y[coord], coord_smooth))
     else:
-        coord_loss = torch.tensor(0.0, device=action_logits.device)
-
-    total_loss = act_loss + coord_loss
-    return total_loss, act_loss, coord_loss
-
-
-def train_epoch(model, dataloader, optimizer, device):
-    model.train()
-    total_loss_accum = 0.0
-    act_loss_accum = 0.0
-    coord_loss_accum = 0.0
-    num_batches = 0
-
-    for in_ids, in_xs, in_ys, tgt_ids, tgt_xs, tgt_ys in dataloader:
-        in_ids = in_ids.to(device)
-        in_xs = in_xs.to(device)
-        in_ys = in_ys.to(device)
-        tgt_ids = tgt_ids.to(device)
-        tgt_xs = tgt_xs.to(device)
-        tgt_ys = tgt_ys.to(device)
-
-        optimizer.zero_grad()
-        act_logits, x_logits, y_logits, _ = model(in_ids, in_xs, in_ys)
-        loss, act_loss, coord_loss = compute_loss(
-            act_logits, x_logits, y_logits, tgt_ids, tgt_xs, tgt_ys
-        )
-
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
-
-        total_loss_accum += loss.item()
-        act_loss_accum += act_loss.item()
-        coord_loss_accum += coord_loss.item()
-        num_batches += 1
-
-    return (
-        total_loss_accum / max(1, num_batches),
-        act_loss_accum / max(1, num_batches),
-        coord_loss_accum / max(1, num_batches),
-    )
+        coord_loss = action_loss * 0.0
+    correct = int((a_log.argmax(-1)[valid] == t_a[valid]).sum())
+    return action_loss, coord_loss, int(valid.sum()), n_coord, correct
 
 
-@torch.no_grad()
-def evaluate_loss(model, dataloader, device):
+def run_epoch(model, items, batch_size, optimizer=None, clip=1.0, shuffle_seed=None, coord_smooth=1.0):
+    training = optimizer is not None
+    model.train(training)
+    order = list(range(len(items)))
+    if training:
+        random.Random(shuffle_seed).shuffle(order)  # shuffle train only
+    tot = dict(a=0.0, c=0.0, na=0, nc=0, correct=0)
+    with torch.set_grad_enabled(training):
+        for s in range(0, len(order), batch_size):
+            batch = collate([items[i] for i in order[s:s + batch_size]])
+            al, cl, na, nc, correct = batch_loss(model, batch, coord_smooth)
+            loss = al + cl
+            if not torch.isfinite(loss):
+                raise FloatingPointError("Non-finite loss: check inputs, targets and learning rate")
+            if training:
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+                optimizer.step()
+            tot["a"] += al.item() * na; tot["na"] += na
+            tot["c"] += cl.item() * nc; tot["nc"] += nc; tot["correct"] += correct
+    a = tot["a"] / max(tot["na"], 1)
+    c = tot["c"] / max(tot["nc"], 1)
+    return {"action_loss": a, "coord_loss": c, "loss": a + c, "action_acc": tot["correct"] / max(tot["na"], 1)}
+
+
+def quick_generation_check(model, cfg, n_per_class, n_classes):
+    res = [generate(model, c, 10_000 + i, cfg.max_len, 0.5) for c in range(n_classes) for i in range(n_per_class)]
+    valid = sum(is_valid(r["actions"]) for r in res) / len(res)
+    done = sum(r["natural_end"] for r in res) / len(res)
+    return valid, done, res
+
+
+def save_checkpoint(path, model, optimizer, epoch, cfg, ds_version, val_loss, classes):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"model_state": model.state_dict(), "optimizer_state": optimizer.state_dict(),
+                "epoch": epoch, "config": asdict(cfg), "model_config": model.config,
+                "dataset_version": ds_version, "seed": cfg.seed, "val_loss": val_loss,
+                "schema_version": SCHEMA_VERSION, "classes": classes}, path)
+
+
+def load_model(path):
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    model = DrawingGRU(**ckpt["model_config"])
+    model.load_state_dict(ckpt["model_state"])
     model.eval()
-    total_loss_accum = 0.0
-    act_loss_accum = 0.0
-    coord_loss_accum = 0.0
-    num_batches = 0
-
-    for in_ids, in_xs, in_ys, tgt_ids, tgt_xs, tgt_ys in dataloader:
-        in_ids = in_ids.to(device)
-        in_xs = in_xs.to(device)
-        in_ys = in_ys.to(device)
-        tgt_ids = tgt_ids.to(device)
-        tgt_xs = tgt_xs.to(device)
-        tgt_ys = tgt_ys.to(device)
-
-        act_logits, x_logits, y_logits, _ = model(in_ids, in_xs, in_ys)
-        loss, act_loss, coord_loss = compute_loss(
-            act_logits, x_logits, y_logits, tgt_ids, tgt_xs, tgt_ys
-        )
-
-        total_loss_accum += loss.item()
-        act_loss_accum += act_loss.item()
-        coord_loss_accum += coord_loss.item()
-        num_batches += 1
-
-    return (
-        total_loss_accum / max(1, num_batches),
-        act_loss_accum / max(1, num_batches),
-        coord_loss_accum / max(1, num_batches),
-    )
+    return model, ckpt
 
 
-def train(
-    data_path: str = "data/processed/toy_drawings.jsonl",
-    hidden_dim: int = 128,
-    embedding_dim: int = 32,
-    batch_size: int = 8,
-    max_len: int = 128,
-    lr: float = 0.001,
-    epochs: int = 20,
-    seed: int = 42,
-    checkpoint_dir: str = "outputs/checkpoints",
-    log_dir: str = "logs",
-):
-    random.seed(seed)
-    torch.manual_seed(seed)
-    device = torch.device("cpu")
+def train(cfg: TrainConfig):
+    set_seed(cfg.seed)
+    torch.set_num_threads(max(1, min(6, os.cpu_count() or 1)))
+    out_dir, log_dir = Path(cfg.out_dir), Path(cfg.log_dir)
+    out_dir.mkdir(parents=True, exist_ok=True); log_dir.mkdir(parents=True, exist_ok=True)
+    examples = load_jsonl(cfg.data)
+    classes = class_list(examples)
+    items, skipped = encode_examples(examples, cfg.max_len, classes)
+    train_items, val_items = split_items(items, cfg.val_frac, cfg.seed)
+    ds_version = dataset_version(cfg.data)
+    (out_dir / "split.json").write_text(json.dumps({
+        "seed": cfg.seed, "val_frac": cfg.val_frac, "dataset_version": ds_version,
+        "train_ids": [i["id"] for i in train_items], "val_ids": [i["id"] for i in val_items]}))
+    print(f"Data: {len(train_items)} train / {len(val_items)} val (skipped {skipped}); classes {classes}; dataset {ds_version}")
 
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    os.makedirs(log_dir, exist_ok=True)
+    model = DrawingGRU(len(classes), cfg.embedding_dim, cfg.hidden_dim)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    import math
+    sched = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda e: cfg.lr_final_frac + (1 - cfg.lr_final_frac) * 0.5 * (1 + math.cos(math.pi * min(e, cfg.epochs) / cfg.epochs)))
+    print(f"Model: DrawingGRU, {model.num_parameters():,} parameters, CPU")
 
-    # Load dataset
-    with open(data_path, "r", encoding="utf-8") as f:
-        examples = [json.loads(line) for line in f if line.strip()]
-
-    # Fixed train / validation split (80 / 20)
-    indices = list(range(len(examples)))
-    random.seed(seed)
-    random.shuffle(indices)
-    split_idx = int(0.8 * len(indices))
-    train_ex = [examples[i] for i in indices[:split_idx]]
-    val_ex = [examples[i] for i in indices[split_idx:]]
-
-    train_ds = DrawingDataset(train_ex, max_len=max_len)
-    val_ds = DrawingDataset(val_ex, max_len=max_len)
-
-    train_loader = DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_drawings
-    )
-    val_loader = DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_drawings
-    )
-
-    model = DrawingGRU(embedding_dim=embedding_dim, hidden_dim=hidden_dim).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-
-    training_log_path = Path(log_dir) / "training_log.csv"
-    with open(training_log_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "epoch",
-            "train_loss",
-            "train_act_loss",
-            "train_coord_loss",
-            "val_loss",
-            "val_act_loss",
-            "val_coord_loss",
-        ])
-
-    best_val_loss = float("inf")
-    print(f"Starting training on {len(train_ds)} train examples, {len(val_ds)} val examples")
-
-    for epoch in range(1, epochs + 1):
-        tr_loss, tr_act, tr_coord = train_epoch(model, train_loader, optimizer, device)
-        v_loss, v_act, v_coord = evaluate_loss(model, val_loader, device)
-
-        print(
-            f"Epoch {epoch:02d}/{epochs:02d} | "
-            f"Train Loss: {tr_loss:.4f} (act: {tr_act:.4f}, coord: {tr_coord:.4f}) | "
-            f"Val Loss: {v_loss:.4f} (act: {v_act:.4f}, coord: {v_coord:.4f})"
-        )
-
-        with open(training_log_path, "a", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([epoch, tr_loss, tr_act, tr_coord, v_loss, v_act, v_coord])
-
-        # Save checkpoint
-        checkpoint_payload = {
-            "epoch": epoch,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "train_loss": tr_loss,
-            "val_loss": v_loss,
-            "config": {
-                "hidden_dim": hidden_dim,
-                "embedding_dim": embedding_dim,
-                "max_len": max_len,
-                "batch_size": batch_size,
-                "lr": lr,
-                "seed": seed,
-            },
-        }
-
-        # Periodic recovery checkpoint
-        torch.save(checkpoint_payload, Path(checkpoint_dir) / "checkpoint_last.pt")
-
-        if v_loss < best_val_loss:
-            best_val_loss = v_loss
-            torch.save(checkpoint_payload, Path(checkpoint_dir) / "best_model.pt")
-            print(f"  --> Saved new best model (val_loss: {v_loss:.4f})")
-
-    print(f"Training completed. Best val loss: {best_val_loss:.4f}")
-    return model
+    log_path = log_dir / "train_log.csv"
+    new_log = not log_path.exists()
+    best = float("inf")
+    with log_path.open("a", newline="", encoding="utf-8") as lf:
+        writer = csv.DictWriter(lf, fieldnames=LOG_FIELDS)
+        if new_log:
+            writer.writeheader()
+        for epoch in range(1, cfg.epochs + 1):
+            t0 = time.time()
+            tr = run_epoch(model, train_items, cfg.batch_size, optimizer, cfg.clip, cfg.seed * 1000 + epoch, cfg.coord_smooth)
+            sched.step()
+            va = run_epoch(model, val_items, cfg.batch_size, coord_smooth=cfg.coord_smooth)
+            valid_rate, completion_rate, samples = quick_generation_check(model, cfg, cfg.eval_samples, len(classes))
+            secs = time.time() - t0
+            writer.writerow({
+                "date": datetime.now().isoformat(timespec="seconds"), "git_commit": git_commit(),
+                "dataset_version": ds_version, "seed": cfg.seed, "model": "DrawingGRU",
+                "hidden_dim": cfg.hidden_dim, "batch_size": cfg.batch_size, "max_len": cfg.max_len,
+                "learning_rate": cfg.lr, "epoch": epoch, "train_loss": f"{tr['loss']:.4f}",
+                "val_loss": f"{va['loss']:.4f}", "train_action_loss": f"{tr['action_loss']:.4f}",
+                "train_coord_loss": f"{tr['coord_loss']:.4f}", "val_action_loss": f"{va['action_loss']:.4f}",
+                "val_coord_loss": f"{va['coord_loss']:.4f}", "val_action_acc": f"{va['action_acc']:.4f}",
+                "valid_rate": f"{valid_rate:.3f}", "completion_rate": f"{completion_rate:.3f}",
+                "epoch_seconds": f"{secs:.1f}", "notes": cfg.notes})
+            lf.flush()
+            print(f"epoch {epoch:3d} | train {tr['loss']:.3f} | val {va['loss']:.3f} "
+                  f"(act {va['action_loss']:.3f}, coord {va['coord_loss']:.3f}, acc {va['action_acc']:.2f}) "
+                  f"| valid {valid_rate:.2f} done {completion_rate:.2f} | {secs:.1f}s")
+            if va["loss"] < best:
+                best = va["loss"]
+                save_checkpoint(out_dir / "checkpoints" / "best.pt", model, optimizer, epoch, cfg, ds_version, best, classes)
+            save_checkpoint(out_dir / "checkpoints" / "last.pt", model, optimizer, epoch, cfg, ds_version, va["loss"], classes)
+            if epoch % cfg.checkpoint_every == 0:
+                save_checkpoint(out_dir / "checkpoints" / f"epoch_{epoch:03d}.pt", model, optimizer, epoch, cfg,
+                                ds_version, va["loss"], classes)
+            if epoch % cfg.sample_every == 0 or epoch == cfg.epochs:
+                for i, r in enumerate(samples):  # same fixed seeds every time
+                    save_sample(out_dir / "samples" / f"epoch_{epoch:03d}", f"{classes[r['class_id']]}_{i}", r)
+    print(f"Best val loss {best:.4f}. Checkpoints in {out_dir / 'checkpoints'}; log at {log_path}")
+    return best
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train the DrawingGRU model.")
-    parser.add_argument("--data", default="data/processed/toy_drawings.jsonl", help="JSONL data file")
-    parser.add_argument("--hidden-dim", type=int, default=128, help="GRU hidden dimension")
-    parser.add_argument("--embedding-dim", type=int, default=32, help="Embedding dimension")
-    parser.add_argument("--batch-size", type=int, default=8, help="Batch size")
-    parser.add_argument("--max-len", type=int, default=128, help="Maximum sequence length")
-    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
-    parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--checkpoint-dir", default="outputs/checkpoints", help="Checkpoints directory")
-    parser.add_argument("--log-dir", default="logs", help="Logs directory")
-    args = parser.parse_args()
-
-    train(
-        data_path=args.data,
-        hidden_dim=args.hidden_dim,
-        embedding_dim=args.embedding_dim,
-        batch_size=args.batch_size,
-        max_len=args.max_len,
-        lr=args.lr,
-        epochs=args.epochs,
-        seed=args.seed,
-        checkpoint_dir=args.checkpoint_dir,
-        log_dir=args.log_dir,
-    )
+def main(argv=None):
+    p = argparse.ArgumentParser(description="Train the Konnon drawing GRU")
+    for f, v in asdict(TrainConfig()).items():
+        p.add_argument("--" + f.replace("_", "-"), type=type(v), default=v)
+    args = p.parse_args(argv)
+    train(TrainConfig(**{k.replace("-", "_"): v for k, v in vars(args).items()}))
 
 
 if __name__ == "__main__":

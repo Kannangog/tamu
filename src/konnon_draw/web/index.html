@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Konnon Drawing Model — Live Drawing Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #0b0f19;
+            --bg-surface: #111827;
+            --bg-elevated: #1e293b;
+            --bg-input: #0f172a;
+            --border: #334155;
+            --border-focus: #6366f1;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+            --accent: #6366f1;
+            --accent-hover: #4f46e5;
+            --accent-glow: rgba(99, 102, 241, 0.35);
+            --pen-active: #38bdf8;
+            --pen-up: #fbbf24;
+            --success: #10b981;
+            --error: #ef4444;
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        header {
+            background-color: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            padding: 14px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-logo {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #6366f1, #38bdf8);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 16px;
+            color: #ffffff;
+            box-shadow: 0 0 16px var(--accent-glow);
+        }
+
+        .brand-text h1 {
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+        }
+
+        .brand-text span {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .header-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .badge {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--text-muted);
+        }
+
+        .badge-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+
+        main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 24px;
+            padding: 24px 28px;
+            max-width: 1600px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        @media (max-width: 1024px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Canvas Stage Area */
+        .stage-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+
+        .category-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .category-btn {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 8px 16px;
+            border-radius: var(--radius-md);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .category-btn:hover {
+            border-color: var(--text-muted);
+            color: var(--text-main);
+            transform: translateY(-1px);
+        }
+
+        .category-btn.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #ffffff;
+            box-shadow: 0 0 16px var(--accent-glow);
+        }
+
+        .canvas-viewport-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 580px;
+            margin: 0 auto;
+            aspect-ratio: 1;
+            background: #ffffff;
+            border-radius: var(--radius-md);
+            border: 2px solid var(--border);
+            overflow: hidden;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+        }
+
+        .grid-overlay {
+            position: absolute;
+            inset: 0;
+            background-size: calc(100% / 16) calc(100% / 16);
+            background-image: 
+                linear-gradient(to right, rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+            pointer-events: none;
+            opacity: 0.6;
+        }
+
+        #drawCanvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Glowing Stylus Cursor */
+        #stylus {
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--pen-active);
+            border: 2px solid #ffffff;
+            box-shadow: 0 0 16px var(--pen-active), 0 0 32px var(--pen-active);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            transition: left 0.05s linear, top 0.05s linear;
+            display: none;
+            z-index: 20;
+        }
+
+        #stylus.pen-up {
+            background: var(--pen-up);
+            box-shadow: 0 0 12px var(--pen-up);
+            opacity: 0.7;
+            transform: translate(-50%, -50%) scale(0.8);
+        }
+
+        #stylus-ripple {
+            position: absolute;
+            border: 2px solid var(--pen-active);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            animation: pulse-ring 1s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+            display: none;
+        }
+
+        @keyframes pulse-ring {
+            0% { width: 14px; height: 14px; opacity: 1; }
+            100% { width: 44px; height: 44px; opacity: 0; }
+        }
+
+        /* Controls Bar */
+        .controls-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            background: var(--bg-elevated);
+            padding: 12px 18px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border);
+        }
+
+        .btn-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 9px 18px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.15s ease;
+        }
+
+        .btn:hover:not(:disabled) {
+            border-color: var(--accent);
+            background: var(--bg-elevated);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #ffffff;
+            box-shadow: 0 0 16px var(--accent-glow);
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .speed-slider {
+            width: 110px;
+            accent-color: var(--accent);
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
+        }
+
+        .progress-bar-bg {
+            height: 6px;
+            background: var(--bg-elevated);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent), var(--pen-active));
+            transition: width 0.1s linear;
+        }
+
+        /* Right Inspector Column */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .panel-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+        }
+
+        .panel-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 10px;
+        }
+
+        .setting-row {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .setting-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-muted);
+        }
+
+        .setting-label span.val {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-main);
+            font-weight: 600;
+        }
+
+        .slider-input {
+            width: 100%;
+            accent-color: var(--accent);
+        }
+
+        .seed-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .seed-input {
+            flex: 1;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-main);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            padding: 8px 12px;
+        }
+
+        .seed-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        /* Live Token Stream */
+        .token-feed {
+            max-height: 200px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            padding-right: 4px;
+        }
+
+        .token-feed::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .token-feed::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        .token-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 10px;
+            background: var(--bg-input);
+            border-radius: var(--radius-sm);
+            border-left: 3px solid var(--border);
+            animation: fadeIn 0.15s ease-out;
+        }
+
+        .token-item.MOVE {
+            border-left-color: var(--pen-active);
+        }
+
+        .token-item.LINE {
+            border-left-color: var(--accent);
+        }
+
+        .token-item.PEN_UP {
+            border-left-color: var(--pen-up);
+        }
+
+        .token-item.END {
+            border-left-color: var(--success);
+        }
+
+        .token-kind {
+            font-weight: 600;
+        }
+
+        .token-coords {
+            color: var(--text-muted);
+            font-size: 11px;
+        }
+
+        /* SVG Code View */
+        .svg-code-box {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            max-height: 140px;
+            overflow-y: auto;
+            color: #cbd5e1;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .export-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        /* Showcase Drawer */
+        .showcase-section {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            max-width: 1600px;
+            margin: 0 auto 32px auto;
+            width: calc(100% - 56px);
+        }
+
+        .showcase-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .showcase-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 14px;
+        }
+
+        .showcase-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            text-align: center;
+        }
+
+        .showcase-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px var(--accent-glow);
+        }
+
+        .showcase-thumb {
+            width: 100%;
+            aspect-ratio: 1;
+            background: #ffffff;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .showcase-thumb object {
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .showcase-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: capitalize;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand">
+            <div class="brand-logo">K</div>
+            <div class="brand-text">
+                <h1>Konnon Drawing Model v0.2</h1>
+                <span>Live Neural Stroke Generation Studio</span>
+            </div>
+        </div>
+        <div class="header-meta">
+            <div class="badge">
+                <span class="badge-dot"></span>
+                <span>PyTorch GRU • 64×64 Grid</span>
+            </div>
+            <div class="badge">
+                <span id="modelStatusText">Model: best.pt (390k params)</span>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- Canvas Stage -->
+        <section class="stage-card">
+            <div class="category-selector" id="categoryButtons">
+                <button class="category-btn active" data-cat="bicycle">🚲 Bicycle</button>
+                <button class="category-btn" data-cat="car">🚗 Car</button>
+                <button class="category-btn" data-cat="chair">🪑 Chair</button>
+                <button class="category-btn" data-cat="house">🏠 House</button>
+                <button class="category-btn" data-cat="bed">🛏️ Bed</button>
+                <button class="category-btn" data-cat="table">🪵 Table</button>
+            </div>
+
+            <div class="canvas-viewport-wrapper">
+                <div class="grid-overlay"></div>
+                <canvas id="drawCanvas" width="512" height="512"></canvas>
+                <div id="stylus"></div>
+                <div id="stylus-ripple"></div>
+            </div>
+
+            <!-- Controls & Speed -->
+            <div class="controls-bar">
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="btnPlayPause">
+                        <span id="playIcon">▶</span>
+                        <span id="playText">Draw Live</span>
+                    </button>
+                    <button class="btn" id="btnStep">⏭ Step</button>
+                    <button class="btn" id="btnReplay" disabled>↺ Replay</button>
+                    <button class="btn" id="btnClear">🗑 Clear</button>
+                </div>
+
+                <div class="speed-control">
+                    <span>Speed:</span>
+                    <input type="range" class="speed-slider" id="speedSlider" min="10" max="400" value="70">
+                    <span id="speedLabel" style="font-family:'JetBrains Mono'; min-width:48px;">70ms</span>
+                </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="progress-container">
+                <div class="progress-header">
+                    <span id="penStateLabel">STATUS: IDLE</span>
+                    <span id="stepCounterLabel">STEP: 0 / 0</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" id="progressBarFill"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Inspector Panel -->
+        <aside class="sidebar">
+            <!-- Model Settings -->
+            <div class="panel-card">
+                <div class="panel-title">
+                    <span>Generation Hyperparameters</span>
+                    <span style="font-size: 11px; color: var(--accent); font-family: 'JetBrains Mono';">Autoregressive</span>
+                </div>
+
+                <div class="setting-row">
+                    <div class="setting-label">
+                        <span>Temperature</span>
+                        <span class="val" id="tempValueLabel">0.40</span>
+                    </div>
+                    <input type="range" class="slider-input" id="tempSlider" min="0.1" max="1.1" step="0.05" value="0.4">
+                    <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--text-dim);">
+                        <span>Tight (0.2)</span>
+                        <span>Balanced (0.4)</span>
+                        <span>Creative (0.8)</span>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div class="setting-label">
+                        <span>Top-K Logit Truncation</span>
+                        <span class="val" id="topkValueLabel">None</span>
+                    </div>
+                    <input type="range" class="slider-input" id="topkSlider" min="0" max="10" step="1" value="0">
+                </div>
+
+                <div class="setting-row">
+                    <div class="setting-label">
+                        <span>Random Seed</span>
+                        <span class="val" id="seedValueLabel">42</span>
+                    </div>
+                    <div class="seed-row">
+                        <input type="number" class="seed-input" id="seedInput" value="42">
+                        <button class="btn" id="btnDice" title="Roll Random Seed">🎲 Roll</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Neural Token Stream -->
+            <div class="panel-card">
+                <div class="panel-title">
+                    <span>Live Action Token Stream</span>
+                    <span id="tokenCountBadge" style="font-size: 11px; font-family: 'JetBrains Mono'; color: var(--text-dim);">0 tokens</span>
+                </div>
+                <div class="token-feed" id="tokenFeed">
+                    <div style="color:var(--text-dim); text-align:center; padding: 24px 0;">Click "Draw Live" to watch neural sequence generation</div>
+                </div>
+            </div>
+
+            <!-- SVG Code & Export -->
+            <div class="panel-card">
+                <div class="panel-title">
+                    <span>Vector Export & Markup</span>
+                    <button class="btn" id="btnCopySvg" style="padding: 3px 8px; font-size: 11px;">Copy</button>
+                </div>
+                <div class="svg-code-box" id="svgCodeBox">&lt;!-- SVG will appear here once drawing finishes --&gt;</div>
+                <div class="export-actions">
+                    <button class="btn" id="btnDownloadSvg" disabled>⬇ Download SVG</button>
+                    <button class="btn" id="btnDownloadJson" disabled>⬇ Export JSON</button>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- Showcase Drawer -->
+    <section class="showcase-section">
+        <div class="showcase-title">
+            <span>✨ Model Showcase Presets</span>
+            <span style="font-size: 12px; font-weight: normal; color: var(--text-dim);">(Click any item to load and animate on canvas)</span>
+        </div>
+        <div class="showcase-grid" id="showcaseGrid">
+            <!-- Dynamically populated -->
+        </div>
+    </section>
+
+    <script src="app.js"></script>
+</body>
+</html>

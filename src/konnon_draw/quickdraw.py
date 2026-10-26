@@ -1,167 +1,116 @@
-"""Quick, Draw! Responsible Dataset Intake Module.
+"""Quick, Draw! (Google, CC BY 4.0 - verify current terms) -> Konnon action JSONL.
 
-Conforms to Step 10 Checklist:
-- Explicit license recording (Creative Commons Attribution 4.0 International).
-- Coordinate normalization from 0..255 to 0.0..1.0 with padding.
-- Strict rejection of non-finite, out-of-bounds, or empty strokes.
-- Human stroke order and pen-up preservation.
+Run on a machine with internet access:
+    python -m konnon_draw.quickdraw --categories bicycle bed chair --per-class 3000
+then train with:  python -m konnon_draw.training --data data/processed/quickdraw.jsonl
+Only the first N lines of each category file are streamed, not the whole file.
 """
-
 import argparse
 import json
 import urllib.request
-from datetime import datetime
+from datetime import date
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
-from .schema import validate_actions
+from .schema import COORD_BINS, dequantize_coord, quantize_coord, validate_actions
 
-DATASET_NAME = "Google Quick, Draw! Dataset"
-DATASET_LICENSE = "Creative Commons Attribution 4.0 International License (CC BY 4.0)"
-DATASET_ATTRIBUTION = "Google Creative Lab / Quick, Draw! Contributors"
-QUICKDRAW_BASE_URL = "https://storage.googleapis.com/quickdraw_dataset/full/simplified"
+BASE = "https://storage.googleapis.com/quickdraw_dataset/full/simplified/{}.ndjson"
+LICENSE = "CC BY 4.0 (Google Creative Lab) - attribution required; confirm at github.com/googlecreativelab/quickdraw-dataset"
 
 
-def quickdraw_strokes_to_actions(drawing: List[List[List[float]]], margin: float = 0.05) -> List[dict]:
-    """Convert Quick, Draw! stroke array [[xs, ys], [xs, ys], ...] to Konnon action representation.
+def download(category, raw_dir, n_lines):
+    raw_dir = Path(raw_dir); raw_dir.mkdir(parents=True, exist_ok=True)
+    dest = raw_dir / f"{category}.ndjson"
+    if dest.exists():
+        return dest
+    req = urllib.request.Request(BASE.format(category.replace(" ", "%20")), headers={"User-Agent": "konnon-draw/0.2"})
+    with urllib.request.urlopen(req, timeout=60) as r, dest.open("wb") as out:
+        for i, line in enumerate(r):
+            out.write(line)
+            if i + 1 >= n_lines:
+                break
+    return dest
 
-    Normalized coordinates are scaled into [margin, 1.0 - margin] preserving aspect ratio.
-    """
-    if not drawing:
-        raise ValueError("Empty drawing")
 
-    all_x = [pt for stroke in drawing for pt in stroke[0]]
-    all_y = [pt for stroke in drawing for pt in stroke[1]]
-
-    if not all_x or not all_y:
-        raise ValueError("No coordinate points in drawing")
-
-    min_x, max_x = min(all_x), max(all_x)
-    min_y, max_y = min(all_y), max(all_y)
-
-    span_x = max(1.0, max_x - min_x)
-    span_y = max(1.0, max_y - min_y)
-    scale = max(span_x, span_y)
-
-    usable_span = 1.0 - 2 * margin
-    offset_x = margin + (usable_span - (span_x / scale) * usable_span) / 2.0
-    offset_y = margin + (usable_span - (span_y / scale) * usable_span) / 2.0
-
+def convert_drawing(strokes, max_len=160):
+    """strokes: [[xs],[ys]] per stroke, simplified 0-255 coords. Returns action list or None to reject."""
+    pts_all = [(x, y) for s in strokes for x, y in zip(s[0], s[1])]
+    if not pts_all:
+        return None
+    xs, ys = [p[0] for p in pts_all], [p[1] for p in pts_all]
+    w, h = max(xs) - min(xs), max(ys) - min(ys)
+    scale = max(w, h)
+    if scale <= 0:
+        return None
+    cx, cy = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
     actions = []
-    for stroke in drawing:
-        xs, ys = stroke[0], stroke[1]
-        if not xs or not ys:
+    for s in strokes:
+        pts, last = [], None
+        for x, y in zip(s[0], s[1]):  # centre, fit to 0.04..0.96, drop repeats within one bin
+            nx = 0.5 + (x - cx) / scale * 0.92
+            ny = 0.5 + (y - cy) / scale * 0.92
+            q = (quantize_coord(nx), quantize_coord(ny))
+            if q != last:
+                pts.append((dequantize_coord(q[0]), dequantize_coord(q[1])))
+                last = q
+        if len(pts) < 2:  # single dots cannot be expressed as MOVE+LINE
             continue
-
-        # Start of stroke
-        norm_x = offset_x + ((xs[0] - min_x) / scale) * usable_span
-        norm_y = offset_y + ((ys[0] - min_y) / scale) * usable_span
-        actions.append({
-            "type": "MOVE",
-            "x": round(max(0.0, min(1.0, norm_x)), 4),
-            "y": round(max(0.0, min(1.0, norm_y)), 4),
-        })
-
-        # Lines in stroke
-        for x, y in zip(xs[1:], ys[1:]):
-            norm_x = offset_x + ((x - min_x) / scale) * usable_span
-            norm_y = offset_y + ((y - min_y) / scale) * usable_span
-            actions.append({
-                "type": "LINE",
-                "x": round(max(0.0, min(1.0, norm_x)), 4),
-                "y": round(max(0.0, min(1.0, norm_y)), 4),
-            })
-
+        actions.append({"type": "MOVE", "x": pts[0][0], "y": pts[0][1]})
+        actions += [{"type": "LINE", "x": x, "y": y} for x, y in pts[1:]]
         actions.append({"type": "PEN_UP"})
-
-    # Strip trailing PEN_UP and finish with END
-    if actions and actions[-1]["type"] == "PEN_UP":
-        actions.pop()
+    if not actions:
+        return None
+    actions.pop()  # trailing PEN_UP
     actions.append({"type": "END"})
-
+    if len(actions) + 1 > max_len:  # +1 for START
+        return None
     validate_actions(actions)
     return actions
 
 
-def download_category_subset(
-    category: str,
-    max_examples: int = 100,
-    dest_dir: str = "data/raw/quickdraw",
-) -> Path:
-    dest_path = Path(dest_dir)
-    dest_path.mkdir(parents=True, exist_ok=True)
-    out_file = dest_path / f"{category}.ndjson"
-
-    safe_category = category.replace(" ", "%20")
-    url = f"{QUICKDRAW_BASE_URL}/{safe_category}.ndjson"
-
-    print(f"Downloading subset of {category} from {url}...")
-    headers = {"User-Agent": "KonnonDrawingModel/0.1"}
-    req = urllib.request.Request(url, headers=headers)
-
-    downloaded = 0
-    with urllib.request.urlopen(req) as resp, open(out_file, "w", encoding="utf-8") as out_f:
-        for line in resp:
-            out_f.write(line.decode("utf-8"))
-            downloaded += 1
-            if downloaded >= max_examples:
-                break
-
-    print(f"Downloaded {downloaded} raw examples to {out_file}")
-    return out_file
-
-
-def process_quickdraw_ndjson(
-    input_file: Path,
-    output_file: Path,
-    category: str,
-    max_count: int = 100,
-) -> int:
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    valid_count = 0
-
-    with open(input_file, "r", encoding="utf-8") as in_f, open(output_file, "a", encoding="utf-8") as out_f:
-        for idx, line in enumerate(in_f):
-            if valid_count >= max_count:
-                break
-            if not line.strip():
-                continue
-            item = json.loads(line)
-            if not item.get("recognized", True):
-                continue
-            raw_drawing = item.get("drawing", [])
-            try:
-                actions = quickdraw_strokes_to_actions(raw_drawing)
-                record = {
-                    "id": f"qd_{category}_{idx}",
-                    "category": category,
-                    "key_id": item.get("key_id", str(idx)),
-                    "actions": actions,
-                }
-                out_f.write(json.dumps(record) + "\n")
-                valid_count += 1
-            except Exception:
-                continue
-
-    return valid_count
+def build_dataset(categories, per_class, max_len, raw_dir, out_path, fetch=True):
+    out_path = Path(out_path); out_path.parent.mkdir(parents=True, exist_ok=True)
+    counts, seen = {}, {}
+    with out_path.open("w", encoding="utf-8") as f:
+        for cat in categories:
+            path = download(cat, raw_dir, per_class * 3) if fetch else Path(raw_dir) / f"{cat}.ndjson"
+            kept = seen_c = 0
+            with path.open(encoding="utf-8") as src:
+                for line in src:
+                    if kept >= per_class:
+                        break
+                    rec = json.loads(line); seen_c += 1
+                    if not rec.get("recognized", True):
+                        continue
+                    acts = convert_drawing(rec["drawing"], max_len)
+                    if acts is None:
+                        continue
+                    f.write(json.dumps({"id": f"{cat}_{rec.get('key_id', kept)}", "category": cat, "actions": acts}) + "\n")
+                    kept += 1
+            counts[cat], seen[cat] = kept, seen_c
+    manifest = {"source": BASE, "license": LICENSE, "access_date": date.today().isoformat(),
+                "categories": categories, "kept": counts, "lines_read": seen,
+                "transforms": ["recognized==True only", f"bbox centred, longest side -> 0.92 of canvas, {COORD_BINS} bins",
+                               "consecutive points in the same bin merged", "single-point strokes dropped",
+                               f"drawings longer than {max_len} tokens rejected"],
+                "split_note": "training.py splits by example; Quick, Draw! has no artist id, so splits may share style."}
+    mp = Path("data/manifests") / (out_path.stem + ".manifest.json")
+    mp.parent.mkdir(parents=True, exist_ok=True)
+    mp.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return counts, mp
 
 
-def write_manifest(manifest_path: Path, categories: List[str], counts: Dict[str, int]):
-    manifest = {
-        "dataset_name": DATASET_NAME,
-        "source": QUICKDRAW_BASE_URL,
-        "license": DATASET_LICENSE,
-        "attribution": DATASET_ATTRIBUTION,
-        "access_date": datetime.now().isoformat(),
-        "categories": categories,
-        "example_counts": counts,
-        "transformations": [
-            "Parsed stroke array [[xs], [ys]] to MOVE/LINE/PEN_UP/END sequence",
-            "Normalized coordinates to [0.05, 0.95] preserving aspect ratio",
-            "Filtered out non-recognized or empty doodles",
-        ],
-    }
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
-    print(f"Wrote intake manifest to {manifest_path}")
+def main(argv=None):
+    p = argparse.ArgumentParser(description="Download + convert Quick, Draw! categories")
+    p.add_argument("--categories", nargs="+", default=["bicycle", "bed", "chair"])
+    p.add_argument("--per-class", type=int, default=3000)
+    p.add_argument("--max-len", type=int, default=160)
+    p.add_argument("--raw-dir", default="data/raw/quickdraw")
+    p.add_argument("--out", default="data/processed/quickdraw.jsonl")
+    p.add_argument("--no-fetch", action="store_true", help="use files already in --raw-dir")
+    a = p.parse_args(argv)
+    counts, mp = build_dataset(a.categories, a.per_class, a.max_len, a.raw_dir, a.out, fetch=not a.no_fetch)
+    print("Kept:", counts, "\nManifest:", mp)
+
+
+if __name__ == "__main__":
+    main()

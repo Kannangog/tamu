@@ -1,0 +1,41 @@
+{
+  "dataset_name": "Google Quick, Draw! Dataset",
+  "source": "https://storage.googleapis.com/quickdraw_dataset/full/simplified",
+  "license": "Creative Commons Attribution 4.0 International License (CC BY 4.0)",
+  "attribution": "Google Creative Lab / Quick, Draw! Contributors",
+  "access_date": "2026-10-26T10:46:10.157033",
+  "categories": [
+    "apple",
+    "cat",
+    "fish",
+    "star",
+    "tree"
+  ],
+  "category_to_id": {
+    "apple": 0,
+    "cat": 1,
+    "fish": 2,
+    "star": 3,
+    "tree": 4
+  },
+  "example_counts_by_category": {
+    "apple": 400,
+    "cat": 388,
+    "fish": 400,
+    "star": 400,
+    "tree": 400
+  },
+  "splits": {
+    "train": 1590,
+    "val": 198,
+    "test": 200,
+    "total": 1988
+  },
+  "transformations": [
+    "Extracted human strokes [[xs], [ys]] preserving stroke order and pen-up state",
+    "Applied Ramer-Douglas-Peucker simplification (epsilon=1.5..3.5) to bound sequences <= 96 actions",
+    "Normalized coordinates to [0.05, 0.95] preserving aspect ratio",
+    "Filtered out unrecognized doodles and malformed sequences",
+    "Stratified 80/10/10 split across all 5 object categories"
+  ]
+}

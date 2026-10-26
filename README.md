@@ -1,123 +1,56 @@
-# Konnon Drawing Model (v0.1)
+# Konnon Drawing Model v0.2
 
-A complete, laptop-first implementation guide for **Konnon Drawing Model v0.1**.
+A category-conditioned GRU that draws everyday objects as pen strokes (MOVE / LINE / PEN_UP / END on a 64x64 grid)
+and exports editable SVG. CPU-only, no image-generation API. Categories in the bundled run:
+**bicycle, bed, chair, table, house, car**.
 
-> **Goal:** Train Konnon's own compact neural model to generate new stroke sequences, render them as editable SVG, and evaluate the results — without using an image-generation API.  
-> **Target Machine:** Ryzen 5 5000-series CPU · 8 GB RAM · integrated Radeon graphics · Windows laptop · zero-budget starting point.
-
----
-
-## Architecture Overview
-
-| Component | Choice in v0.1 |
-|---|---|
-| **Representation** | Fixed canvas (256×256); action tokens `MOVE`, `LINE`, `PEN_UP`, `END`, `PAD` plus quantized x/y targets (32 bins). |
-| **Model** | Compact `DrawingGRU` sequence model in PyTorch (`hidden_dim=128`, `embedding_dim=32`). |
-| **Training** | Next-action prediction with masked cross-entropy. Pad positions and non-coordinate actions (`PEN_UP`, `END`, `PAD`) do not contribute to coordinate loss. |
-| **Rendering** | Deterministic Python SVG renderer producing valid, editable W3C SVG paths (`M x y L x y`). |
-| **Data** | Synthetic geometric shapes (triangles, rectangles, crosses, zigzags) with jitter; plus responsible intake pipeline for Google Quick, Draw! |
-| **Evaluation** | 6 Release Gates (0 to 5): Data/Renderer, Training convergence, Generation vs Random baseline, Held-out generalization, SVG export & editability, Governance. |
-
----
-
-## Repository Structure
-
-```
-konnon-drawing-model/
-├── .gitignore
-├── README.md
-├── pyproject.toml
-├── configs/
-│   └── train_config.json
-├── data/
-│   ├── raw/
-│   ├── processed/
-│   └── manifests/
-├── docs/
-│   └── evaluation_report.md
-├── src/
-│   └── konnon_draw/
-│       ├── __init__.py
-│       ├── schema.py          # Action vocabulary, quantization & validation
-│       ├── renderer.py        # Deterministic SVG renderer
-│       ├── data_gen.py        # Synthetic dataset generator
-│       ├── encoding.py        # Tokenizer: action & coordinate encode/decode
-│       ├── model.py           # PyTorch DrawingGRU architecture
-│       ├── training.py        # Masked loss training loop with checkpointing
-│       ├── sampling.py        # Constrained autoregressive generation & contact sheet
-│       ├── evaluation.py      # Release gates verification & metrics
-│       └── quickdraw.py       # Responsible intake pipeline for Quick, Draw!
-├── scripts/
-│   └── render_demo.py         # Standalone SVG smoke test
-├── tests/
-│   ├── test_schema.py
-│   ├── test_renderer.py
-│   ├── test_encoding.py
-│   ├── test_model.py
-│   ├── test_training.py
-│   ├── test_sampling.py
-│   ├── test_evaluation.py
-│   └── test_quickdraw.py
-├── logs/
-│   ├── training_log.csv
-│   └── experiment_log.csv
-└── outputs/
-    ├── samples/               # Exported SVGs, JSONs, and contact_sheet.html
-    └── checkpoints/           # best_model.pt and checkpoint_last.pt
-```
-
----
-
-## Quickstart Guide
-
-### 1. Environment Setup
-
+## Quick start (Windows PowerShell, project root)
 ```powershell
-# Create virtual environment with Python 3.11
-uv venv --python 3.11 .venv
+py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-
-# Install package in editable mode with dependencies
-uv pip install -e .
+python -m pip install --upgrade pip
+pip install numpy pillow matplotlib pytest
+# PyTorch: CPU command from https://pytorch.org/get-started/locally/
+pip install -e .
+.\scripts\run_all.ps1
 ```
-
-### 2. Smoke Test the SVG Renderer
-
+Draw something with the trained model:
 ```powershell
-python scripts/render_demo.py
+python -m konnon_draw.sampling --category bicycle --n 8 --temperature 0.4 --out outputs/samples/mine
+python -m konnon_draw.sampling --category all --n 4 --seed 5
 ```
-Outputs `outputs/samples/renderer_demo.svg`.
+Each sample is saved as `.json` (actions) and `.svg` (open in a browser / Inkscape and edit the paths).
+Temperature: 0.3-0.5 gives clean lines; 0.8+ gets wobbly (wheels especially). `--top-k 3` also tightens output.
 
-### 3. Run Unit Tests
+## Two data sources
+1. **Procedural objects (`objects_gen.py`)** - self-made, no licence issues, used for the bundled run.
+   Parametric strokes with random proportions, mirroring, scale and shift. The model learns clean
+   line-drawing structure, but only in the style of these templates.
+2. **Quick, Draw! (`quickdraw.py`)** - real human doodles, for variety. Needs internet:
+   ```powershell
+   python -m konnon_draw.quickdraw --categories bicycle bed chair table house car --per-class 3000
+   python -m konnon_draw.training --data data/processed/quickdraw.jsonl --out-dir outputs_qd --log-dir logs_qd
+   python -m konnon_draw.evaluation --data data/processed/quickdraw.jsonl --checkpoint outputs_qd/checkpoints/best.pt --out outputs_qd/eval --log logs_qd/train_log.csv
+   ```
+   Only the first lines of each category are streamed (not the whole multi-hundred-MB file). A manifest with source,
+   licence (CC BY 4.0 - attribution required, verify current terms), access date and transforms is written to `data/manifests/`.
+   This path was tested on synthetic NDJSON only (the build sandbox could not reach Google's servers), not on the real download.
+   Human doodles are far messier than the templates: expect rougher results and consider `--hidden-dim 384`, more epochs and a lower `--lr`.
 
-```powershell
-pytest -v
-```
+## What changed since v0.1
+- Category conditioning (embedding fed at every step and into the initial state).
+- 64 coordinate bins (was 32); Gaussian-smoothed coordinate targets so near-misses cost less; cosine LR schedule.
+- Hidden size 256, max length 160, batch 32 (about 390k parameters).
+- Per-category evaluation incl. kNN "recognized as requested" score, contact sheet grouped by category.
+- Memory-safe distance computation in evaluation (a naive version needs >11 GB RAM).
 
-### 4. Generate the Synthetic Dataset
+## Reading the results honestly
+- Validity ~100% is mostly by construction (constrained decoder). Judge quality from `outputs/eval/contact_sheet.png`.
+- kNN recognizability compares samples with training drawings, so it favours copies of the template style; it is a proxy, not a human rating.
+- Chairs, tables, houses and beds come out clean; bicycle wheels and car wheels are the weak spot (closing a 20-point circle from memory).
+- It draws only the categories it was trained on. Free-text prompts ("a red chair next to a lamp") are not supported.
+- Anime or detailed art is a separate, much larger milestone.
 
-```powershell
-python -m konnon_draw.data_gen --n 600 --seed 7
-```
-Writes 600 validated examples to `data/processed/toy_drawings.jsonl`.
-
-### 5. Train the DrawingGRU Model
-
-```powershell
-python -m konnon_draw.training --epochs 20 --batch-size 8 --lr 0.001 --hidden-dim 128
-```
-Saves best model to `outputs/checkpoints/best_model.pt` and logs to `logs/training_log.csv`.
-
-### 6. Autoregressively Sample New Drawings
-
-```powershell
-python -m konnon_draw.sampling --num-samples 64 --temperature 0.8
-```
-Generates 64 SVG drawings and an HTML contact sheet `outputs/samples/contact_sheet.html`.
-
-### 7. Run Evaluation & Release Gates
-
-```powershell
-python -m konnon_draw.evaluation
-```
-Evaluates Gates 0–5, checks metrics against the unconstrained random baseline, appends to `logs/experiment_log.csv`, and writes `docs/evaluation_report.md`.
+## Layout
+`schema.py` actions + validator | `renderer.py` SVG | `objects_gen.py`, `data_gen.py` (toy shapes), `quickdraw.py` data |
+`encoding.py` | `model.py` | `training.py` | `sampling.py` | `evaluation.py` | `raster.py` | `tests/` (37 tests)

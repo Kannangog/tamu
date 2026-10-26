@@ -1,4 +1,5 @@
 from pathlib import Path
+
 from konnon_draw.renderer import render_svg
 
 demo = [
@@ -10,9 +11,6 @@ demo = [
     {"type": "LINE", "x": 0.7, "y": 0.55},
     {"type": "END"},
 ]
-
 Path("outputs/samples").mkdir(parents=True, exist_ok=True)
-Path("outputs/samples/renderer_demo.svg").write_text(
-    render_svg(demo), encoding="utf-8"
-)
+Path("outputs/samples/renderer_demo.svg").write_text(render_svg(demo), encoding="utf-8")
 print("Wrote outputs/samples/renderer_demo.svg")

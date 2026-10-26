@@ -1,48 +1,43 @@
-from xml.sax.saxutils import escape
-from .schema import validate_actions, dequantize_coord, COORD_BINS, CANVAS_SIZE
+"""Deterministic SVG renderer. Model output is data; only this trusted code emits markup."""
+from .schema import validate_actions
 
 
-def render_svg(actions, width=256, height=256):
+def actions_to_paths(actions):
+    """Return a list of paths; each path is a list of normalized (x, y) points."""
     validate_actions(actions)
-    paths = []
-    current = []
+    paths, current = [], []
     for a in actions:
         kind = a["type"]
         if kind == "MOVE":
-            if current:
-                paths.append(current)
-            x = dequantize_coord(a["xq"]) if "xq" in a else float(a["x"])
-            y = dequantize_coord(a["yq"]) if "yq" in a else float(a["y"])
-            current = [(x * width, y * height)]
+            current = [(float(a["x"]), float(a["y"]))]
         elif kind == "LINE":
-            if not current:
-                raise ValueError("LINE requires a preceding MOVE")
-            x = dequantize_coord(a["xq"]) if "xq" in a else float(a["x"])
-            y = dequantize_coord(a["yq"]) if "yq" in a else float(a["y"])
-            current.append((x * width, y * height))
+            current.append((float(a["x"]), float(a["y"])))
         elif kind == "PEN_UP":
-            if current:
-                paths.append(current)
+            paths.append(current)
             current = []
         elif kind == "END":
+            if current:
+                paths.append(current)
+                current = []
             break
-    if current:
-        paths.append(current)
+    return paths
+
+
+def render_svg(actions, width=256, height=256, stroke="#111827", stroke_width=2):
+    paths = actions_to_paths(actions)
     elements = []
     for points in paths:
-        if not points:
-            continue
-        d = f"M {points[0][0]:.2f} {points[0][1]:.2f}"
+        d = f"M {points[0][0] * width:.2f} {points[0][1] * height:.2f}"
         for x, y in points[1:]:
-            d += f" L {x:.2f} {y:.2f}"
+            d += f" L {x * width:.2f} {y * height:.2f}"
         elements.append(
-            f'<path d="{d}" fill="none" stroke="#111827" '
-            f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="{d}" fill="none" stroke="{stroke}" '
+            f'stroke-width="{stroke_width}" stroke-linecap="round" stroke-linejoin="round"/>'
         )
     content = "\n".join(elements)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
         f'height="{height}" viewBox="0 0 {width} {height}">'
         f'<rect width="100%" height="100%" fill="white"/>'
-        f'{content}</svg>'
+        f"{content}</svg>"
     )

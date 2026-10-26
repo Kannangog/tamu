@@ -1,9 +1,13 @@
+"""Synthetic toy dataset: triangle / rectangle / cross / zigzag with jitter."""
 import argparse
 import json
 import random
 from pathlib import Path
 
+from .schema import validate_actions
+
 OUT = Path("data/processed/toy_drawings.jsonl")
+CATEGORIES = ["triangle", "rectangle", "cross", "zigzag"]
 
 
 def drawing(points_list):
@@ -21,67 +25,48 @@ def drawing(points_list):
     return actions
 
 
-def jitter(points, amount=0.025):
+def jitter(points, rng, amount=0.025):
     return [
         (
-            max(0.03, min(0.97, x + random.uniform(-amount, amount))),
-            max(0.03, min(0.97, y + random.uniform(-amount, amount))),
+            max(0.03, min(0.97, x + rng.uniform(-amount, amount))),
+            max(0.03, min(0.97, y + rng.uniform(-amount, amount))),
         )
         for x, y in points
     ]
 
 
 def make_examples(n=600, seed=7):
-    random.seed(seed)
+    rng = random.Random(seed)
     examples = []
     for i in range(n):
-        cx, cy = random.uniform(0.35, 0.65), random.uniform(0.35, 0.65)
-        size = random.uniform(0.15, 0.3)
+        cx, cy = rng.uniform(0.35, 0.65), rng.uniform(0.35, 0.65)
+        size = rng.uniform(0.15, 0.3)
         kind = i % 4
         if kind == 0:
-            p = [(cx, cy - size), (cx + size, cy + size), (cx - size, cy + size), (cx, cy - size)]
+            strokes = [[(cx, cy - size), (cx + size, cy + size), (cx - size, cy + size), (cx, cy - size)]]
         elif kind == 1:
-            p = [
-                (cx - size, cy - size),
-                (cx + size, cy - size),
-                (cx + size, cy + size),
-                (cx - size, cy + size),
-                (cx - size, cy - size),
-            ]
+            strokes = [[(cx - size, cy - size), (cx + size, cy - size),
+                        (cx + size, cy + size), (cx - size, cy + size), (cx - size, cy - size)]]
         elif kind == 2:
-            p = [(cx - size, cy - size), (cx + size, cy + size)]
-            q = [(cx - size, cy + size), (cx + size, cy - size)]
-            examples.append({
-                "id": f"toy_{i}",
-                "category": "cross",
-                "actions": drawing([jitter(p), jitter(q)]),
-            })
-            continue
+            strokes = [[(cx - size, cy - size), (cx + size, cy + size)],
+                       [(cx - size, cy + size), (cx + size, cy - size)]]
         else:
-            p = [
-                (cx - size, cy),
-                (cx - size / 2, cy - size),
-                (cx, cy + size),
-                (cx + size / 2, cy - size),
-                (cx + size, cy),
-            ]
-        examples.append({
-            "id": f"toy_{i}",
-            "category": ["triangle", "rectangle", "cross", "zigzag"][kind],
-            "actions": drawing([jitter(p)]),
-        })
+            strokes = [[(cx - size, cy), (cx - size / 2, cy - size), (cx, cy + size),
+                        (cx + size / 2, cy - size), (cx + size, cy)]]
+        actions = drawing([jitter(s, rng) for s in strokes])
+        validate_actions(actions)
+        examples.append({"id": f"toy_{i}", "category": CATEGORIES[kind], "actions": actions})
     return examples
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Generate synthetic toy drawings dataset.")
-    parser.add_argument("--out", type=Path, default=OUT, help="Output path for JSONL file")
-    parser.add_argument("--n", type=int, default=600, help="Number of examples")
-    parser.add_argument("--seed", type=int, default=7, help="Random seed")
-    args = parser.parse_args()
-
+def main(argv=None):
+    p = argparse.ArgumentParser()
+    p.add_argument("--n", type=int, default=600)
+    p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--out", type=Path, default=OUT)
+    args = p.parse_args(argv)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    examples = make_examples(n=args.n, seed=args.seed)
+    examples = make_examples(args.n, args.seed)
     with args.out.open("w", encoding="utf-8") as f:
         for ex in examples:
             f.write(json.dumps(ex) + "\n")
