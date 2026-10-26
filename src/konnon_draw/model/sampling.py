@@ -32,6 +32,8 @@ def sample_stage_tokens(
     top_k: int = 25,
     device: str = "cpu",
     seed: int = 42,
+    length_prior_alpha: float = 0.04,
+    min_stage_tokens: int = 16,
 ) -> List[int]:
     """Autoregressively samples a sequence of drawing tokens for one stage using KV-cache."""
     torch.manual_seed(seed)
@@ -60,8 +62,11 @@ def sample_stage_tokens(
         # Enforce syntactic grammar
         next_logits[PAD_TOKEN] = -1e9
         next_logits[BOS_TOKEN] = -1e9
-        if step < 4:
+        if step < min_stage_tokens:
             next_logits[EOS_TOKEN] = -1e9
+        elif length_prior_alpha > 0:
+            # Calibrated length prior encouraging natural stage termination
+            next_logits[EOS_TOKEN] += length_prior_alpha * (step - min_stage_tokens)
 
         # Temperature scaling & Top-K filtering
         if temperature > 0:

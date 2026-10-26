@@ -52,13 +52,15 @@ def train_one_epoch(
     optimizer: optim.Optimizer,
     scheduler: Any,
     device: str,
+    criterion: Optional[nn.Module] = None,
     grad_clip: float = 1.0,
 ) -> float:
     model.train()
     total_loss = 0.0
     total_batches = 0
 
-    criterion = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
+    if criterion is None:
+        criterion = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
 
     for batch in dataloader:
         captions = batch["caption"]
@@ -106,11 +108,13 @@ def evaluate(
     text_encoder: FrozenTextEncoder,
     dataloader: DataLoader,
     device: str,
+    criterion: Optional[nn.Module] = None,
 ) -> float:
     model.eval()
     total_loss = 0.0
     total_batches = 0
-    criterion = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
+    if criterion is None:
+        criterion = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
 
     with torch.no_grad():
         for batch in dataloader:
@@ -196,12 +200,17 @@ def train_staged_model(config_path: Union[str, Path]) -> Dict[str, Any]:
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Initialized KonnonStagedTransformer: {n_params:,} trainable parameters")
 
-    # 3. Optimizer & Scheduler
+    # 3. Optimizer, Loss Weights & Scheduler
     lr = float(t_cfg.get("learning_rate", 8e-4))
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=t_cfg.get("weight_decay", 0.01))
     max_epochs = t_cfg.get("max_epochs", 5)
     total_steps = len(train_loader) * max_epochs
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs, eta_min=lr * 0.1)
+
+    eos_weight = float(t_cfg.get("eos_weight", 4.0))
+    loss_weights = torch.ones(VOCAB_SIZE, device=device)
+    loss_weights[EOS_TOKEN] = eos_weight
+    criterion = nn.CrossEntropyLoss(weight=loss_weights, ignore_index=PAD_TOKEN)
 
     best_val_loss = float("inf")
     history = []
@@ -218,9 +227,10 @@ def train_staged_model(config_path: Union[str, Path]) -> Dict[str, Any]:
             optimizer=optimizer,
             scheduler=None,
             device=device,
+            criterion=criterion,
             grad_clip=t_cfg.get("grad_clip", 1.0),
         )
-        val_loss = evaluate(model, text_encoder, val_loader, device=device)
+        val_loss = evaluate(model, text_encoder, val_loader, device=device, criterion=criterion)
         scheduler.step()
 
         elapsed = time.time() - t0
