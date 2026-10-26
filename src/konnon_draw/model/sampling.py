@@ -7,8 +7,9 @@ from PIL import Image
 import torch
 import torch.nn.functional as F
 
-from ..v2.schema import DocumentV2
+from ..v2.schema import DocumentV2, LayerV2
 from ..v2.renderer import render_document_v2
+from ..artist_skills import create_standard_layers
 from ..v2.tokens import (
     VOCAB_SIZE,
     PAD_TOKEN,
@@ -112,7 +113,7 @@ def generate_staged_drawing(
 
     # Initial blank white canvas
     canvas_arr = np.ones((canvas_res, canvas_res, 3), dtype=np.uint8) * 255
-    running_doc = DocumentV2()
+    running_doc = DocumentV2(layers=create_standard_layers())
 
     stage_history = []
 
@@ -145,6 +146,13 @@ def generate_staged_drawing(
 
         # Decode tokens to DocumentV2 actions
         stage_doc = token_sequence_to_doc(stage_tokens)
+
+        # Merge any additional layers from stage_doc
+        existing_ids = {l.id for l in running_doc.layers}
+        for l in stage_doc.layers:
+            if l.id not in existing_ids:
+                running_doc.layers.append(l)
+                existing_ids.add(l.id)
 
         # Tag stage
         for cmd in stage_doc.commands:

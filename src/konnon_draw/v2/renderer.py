@@ -641,8 +641,17 @@ def render_document_v2(
             cmds_by_layer[lid] = []
         cmds_by_layer[lid].append(cmd)
 
+    # Ensure all referenced layers exist in layer stack so commands are never skipped
+    active_layers = list(doc_v2.layers)
+    defined_layer_ids = {l.id for l in active_layers}
+    for lid, cmds in cmds_by_layer.items():
+        if lid not in defined_layer_ids and cmds:
+            active_layers.append(
+                LayerV2(id=lid, name=lid.replace("_", " ").title(), opacity=1.0, blend_mode="normal", visible=True)
+            )
+
     # Composite each layer
-    for layer_def in doc_v2.layers:
+    for layer_def in active_layers:
         if not layer_def.visible:
             continue
 
@@ -784,7 +793,16 @@ def export_svg_v2(
             layer_commands[lid] = []
         layer_commands[lid].append(cmd)
 
-    for layer_def in doc_v2.layers:
+    # Ensure all referenced layers exist in SVG layer stack so commands are never skipped
+    active_layers = list(doc_v2.layers)
+    defined_layer_ids = {l.id for l in active_layers}
+    for lid, cmds in layer_commands.items():
+        if lid not in defined_layer_ids and cmds:
+            active_layers.append(
+                LayerV2(id=lid, name=lid.replace("_", " ").title(), opacity=1.0, blend_mode="normal", visible=True)
+            )
+
+    for layer_def in active_layers:
         if not layer_def.visible:
             continue
         cmds = layer_commands.get(layer_def.id, [])

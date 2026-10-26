@@ -439,7 +439,7 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
             )
 
             stage_history_res = []
-            cum_doc = DocumentV2()
+            cum_doc = DocumentV2(layers=list(gen_res["doc"].layers))
             for h in gen_res["stage_history"]:
                 stg_doc = token_sequence_to_doc(h["tokens"])
                 for cmd in stg_doc.commands:

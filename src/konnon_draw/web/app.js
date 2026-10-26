@@ -848,8 +848,32 @@ if (handDemoModal) {
     });
 }
 
+// Dynamic Model Status in Navbar
+async function fetchModelStatus() {
+    try {
+        const res = await fetch('/api/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        const archBadge = document.getElementById('modelArchBadge');
+        const statusText = document.getElementById('modelStatusText');
+        if (data.staged_model_ready && data.staged_parameters) {
+            const paramsM = (data.staged_parameters / 1e6).toFixed(2);
+            if (archBadge) archBadge.textContent = `Staged Transformer (v0) • ${paramsM}M Params`;
+            if (statusText) {
+                const ckpt = data.staged_checkpoint || data.checkpoint || '';
+                const parts = ckpt.replace(/\\/g, '/').split('/');
+                const shortName = parts.slice(-3).join('/');
+                statusText.textContent = `Model: ${shortName}`;
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to load model status:', e);
+    }
+}
+
 // Initialize on page load
 setupCanvas();
+fetchModelStatus();
 loadShowcase();
 loadHandDemos();
 startNewDrawing();
