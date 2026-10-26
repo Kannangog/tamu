@@ -12,7 +12,7 @@ from typing import Optional
 
 import torch
 
-from .renderer import render_svg
+from .renderer import actions_to_bezier_segments, render_svg
 from .sampling import generate
 from .training import load_model
 
@@ -119,6 +119,9 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
             seed = int(payload.get("seed", 42))
             temperature = float(payload.get("temperature", 0.4))
             top_k = payload.get("top_k", None)
+            smooth = bool(payload.get("smooth", True))
+            continuous = bool(payload.get("continuous", True))
+
             if top_k is not None:
                 top_k = int(top_k)
 
@@ -136,10 +139,13 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
                 max_len=max_len,
                 temperature=temperature,
                 top_k=top_k,
+                continuous_coords=continuous,
             )
 
             actions = res["actions"]
-            svg_markup = render_svg(actions)
+            svg_smooth = render_svg(actions, width=256, height=256, smooth=True)
+            svg_raw = render_svg(actions, width=256, height=256, smooth=False)
+            bezier_strokes = actions_to_bezier_segments(actions, width=512, height=512)
 
             response_data = {
                 "category": category,
@@ -147,11 +153,16 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
                 "seed": seed,
                 "temperature": temperature,
                 "top_k": top_k,
+                "smooth": smooth,
+                "continuous": continuous,
                 "n_tokens": res.get("n_tokens", len(actions)),
                 "natural_end": res.get("natural_end", True),
                 "repaired": res.get("repaired", False),
                 "actions": actions,
-                "svg": svg_markup,
+                "bezier_strokes": bezier_strokes,
+                "svg_smooth": svg_smooth,
+                "svg_raw": svg_raw,
+                "svg": svg_smooth if smooth else svg_raw,
             }
             self.send_json(response_data)
             return

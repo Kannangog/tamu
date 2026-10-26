@@ -1,4 +1,4 @@
-// Konnon Drawing Model — Live Drawing Studio Client Engine
+// Konnon Drawing Model — Live Drawing Studio Client Engine (Option 1: Bézier Curves & Continuous Coords)
 
 let currentCategory = 'bicycle';
 let currentActions = [];
@@ -6,6 +6,7 @@ let currentIndex = 0;
 let isPlaying = false;
 let animationTimer = null;
 let lastSvgContent = '';
+let currentPaths = []; // Array of point arrays for smooth rendering
 
 // Canvas and contexts
 const canvas = document.getElementById('drawCanvas');
@@ -40,15 +41,24 @@ const btnDownloadJson = document.getElementById('btnDownloadJson');
 const categoryButtons = document.getElementById('categoryButtons');
 const showcaseGrid = document.getElementById('showcaseGrid');
 
+// Vector Engine Toggles (Option 1)
+const chkSmoothBezier = document.getElementById('chkSmoothBezier');
+const chkShowHandles = document.getElementById('chkShowHandles');
+const chkContinuous = document.getElementById('chkContinuous');
+
 // Setup High-DPI canvas
 function setupCanvas() {
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
+    ctx.resetTransform();
     ctx.scale(dpr, dpr);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    if (currentActions.length > 0) {
+        redrawCanvasUpTo(currentIndex);
+    }
 }
 window.addEventListener('resize', setupCanvas);
 
@@ -59,7 +69,6 @@ categoryButtons.addEventListener('click', (e) => {
     document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     currentCategory = btn.dataset.cat;
-    // Auto-draw on category switch
     startNewDrawing();
 });
 
@@ -81,24 +90,45 @@ btnDice.addEventListener('click', () => {
     seedInput.value = Math.floor(Math.random() * 10000);
 });
 
+// Toggles Redraw Handlers
+if (chkSmoothBezier) {
+    chkSmoothBezier.addEventListener('change', () => {
+        redrawCanvasUpTo(currentIndex);
+    });
+}
+if (chkShowHandles) {
+    chkShowHandles.addEventListener('change', () => {
+        redrawCanvasUpTo(currentIndex);
+    });
+}
+if (chkContinuous) {
+    chkContinuous.addEventListener('change', () => {
+        startNewDrawing();
+    });
+}
+
 // Clear Canvas
 btnClear.addEventListener('click', () => {
     stopAnimation();
     resetCanvas();
     currentActions = [];
+    currentPaths = [];
     currentIndex = 0;
     updateProgressUI();
     tokenFeed.innerHTML = '<div style="color:var(--text-dim); text-align:center; padding: 24px 0;">Canvas cleared</div>';
 });
 
 function resetCanvas() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+    ctx.clearRect(0, 0, w, h);
     stylus.style.display = 'none';
     stylusRipple.style.display = 'none';
     btnReplay.disabled = true;
     btnDownloadSvg.disabled = true;
     btnDownloadJson.disabled = true;
     svgCodeBox.textContent = '<!-- SVG will appear here once drawing finishes -->';
+    currentPaths = [];
 }
 
 // Fetch new drawing from model API
@@ -115,6 +145,8 @@ async function startNewDrawing() {
             seed: parseInt(seedInput.value, 10) || 42,
             temperature: parseFloat(tempSlider.value),
             top_k: topkSlider.value === '0' ? null : parseInt(topkSlider.value, 10),
+            smooth: chkSmoothBezier ? chkSmoothBezier.checked : true,
+            continuous: chkContinuous ? chkContinuous.checked : true,
         };
 
         const res = await fetch('/api/generate', {
@@ -130,7 +162,7 @@ async function startNewDrawing() {
         const data = await res.json();
         currentActions = data.actions;
         currentIndex = 0;
-        lastSvgContent = data.svg;
+        lastSvgContent = (chkSmoothBezier && chkSmoothBezier.checked) ? data.svg_smooth : data.svg_raw;
 
         tokenFeed.innerHTML = '';
         tokenCountBadge.textContent = `${currentActions.length} tokens`;
@@ -202,8 +234,11 @@ btnStep.addEventListener('click', () => {
 // Replay current drawing
 btnReplay.addEventListener('click', () => {
     stopAnimation();
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+    ctx.clearRect(0, 0, w, h);
     currentIndex = 0;
+    currentPaths = [];
     tokenFeed.innerHTML = '';
     playDrawing();
 });
@@ -232,7 +267,121 @@ function tick() {
     }
 }
 
-let activePathPoints = [];
+// Re-render canvas up to specified step
+function redrawCanvasUpTo(limitIdx) {
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Reconstruct paths up to limitIdx
+    const paths = [];
+    let cur = [];
+    for (let i = 0; i < limitIdx; i++) {
+        const a = currentActions[i];
+        if (a.type === 'MOVE') {
+            cur = [{ x: a.x * w, y: a.y * h }];
+        } else if (a.type === 'LINE') {
+            if (cur.length > 0) cur.push({ x: a.x * w, y: a.y * h });
+        } else if (a.type === 'PEN_UP') {
+            if (cur.length > 0) { paths.push(cur); cur = []; }
+        }
+    }
+    if (cur.length > 0) paths.push(cur);
+
+    // Render paths
+    const useBezier = chkSmoothBezier ? chkSmoothBezier.checked : true;
+    const showHandles = chkShowHandles ? chkShowHandles.checked : false;
+
+    paths.forEach(pts => {
+        if (pts.length < 2) return;
+        renderPathOnCanvas(pts, useBezier, showHandles);
+    });
+}
+
+function renderPathOnCanvas(points, useBezier, showHandles) {
+    if (points.length < 2) return;
+
+    if (!useBezier || points.length < 3) {
+        // Simple polygonal
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        return;
+    }
+
+    // Catmull-Rom to Cubic Bézier Spline
+    const n = points.length;
+    const isClosed = Math.hypot(points[0].x - points[n - 1].x, points[0].y - points[n - 1].y) < 12;
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+
+    const handlePairs = [];
+
+    for (let i = 0; i < n - 1; i++) {
+        const p1 = points[i];
+        const p2 = points[i + 1];
+
+        const p0 = (i > 0) ? points[i - 1] : (isClosed ? points[n - 2] : { x: 2 * p1.x - p2.x, y: 2 * p1.y - p2.y });
+        const p3 = (i + 2 < n) ? points[i + 2] : (isClosed ? points[1] : { x: 2 * p2.x - p1.x, y: 2 * p2.y - p1.y });
+
+        // Angle corner check
+        const v1x = p1.x - p0.x, v1y = p1.y - p0.y;
+        const v2x = p2.x - p1.x, v2y = p2.y - p1.y;
+        const len1 = Math.hypot(v1x, v1y), len2 = Math.hypot(v2x, v2y);
+        let isCorner = false;
+        if (len1 > 1e-4 && len2 > 1e-4) {
+            const dot = (v1x * v2x + v1y * v2y) / (len1 * len2);
+            const angle = Math.acos(Math.max(-1, Math.min(1, dot))) * (180 / Math.PI);
+            if (angle > 50.0) isCorner = true;
+        }
+
+        if (isCorner) {
+            ctx.lineTo(p2.x, p2.y);
+        } else {
+            const cx1 = p1.x + (p2.x - p0.x) / 6.0;
+            const cy1 = p1.y + (p2.y - p0.y) / 6.0;
+            const cx2 = p2.x - (p3.x - p1.x) / 6.0;
+            const cy2 = p2.y - (p3.y - p1.y) / 6.0;
+            ctx.bezierCurveTo(cx1, cy1, cx2, cy2, p2.x, p2.y);
+
+            if (showHandles) {
+                handlePairs.push({ p1, cx1, cy1, cx2, cy2, p2 });
+            }
+        }
+    }
+
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Render Tangent Control Handles if enabled
+    if (showHandles && handlePairs.length > 0) {
+        handlePairs.forEach(h => {
+            // Tangent lines
+            ctx.beginPath();
+            ctx.moveTo(h.p1.x, h.p1.y);
+            ctx.lineTo(h.cx1, h.cy1);
+            ctx.moveTo(h.p2.x, h.p2.y);
+            ctx.lineTo(h.cx2, h.cy2);
+            ctx.strokeStyle = 'rgba(245, 158, 11, 0.45)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Handle points
+            ctx.fillStyle = '#f59e0b';
+            ctx.beginPath();
+            ctx.arc(h.cx1, h.cy1, 3, 0, Math.PI * 2);
+            ctx.arc(h.cx2, h.cy2, 3, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    }
+}
 
 function executeStep(idx) {
     const a = currentActions[idx];
@@ -251,31 +400,26 @@ function executeStep(idx) {
 
     if (a.type === 'MOVE') {
         stylus.classList.remove('pen-up');
-        activePathPoints = [{ x: a.x * w, y: a.y * h }];
-        penStateLabel.textContent = `PEN DOWN: MOVE (${a.x.toFixed(2)}, ${a.y.toFixed(2)})`;
+        currentPaths.push([{ x: a.x * w, y: a.y * h }]);
+        penStateLabel.textContent = `PEN DOWN: MOVE (${a.x.toFixed(3)}, ${a.y.toFixed(3)})`;
     } else if (a.type === 'LINE') {
         stylus.classList.remove('pen-up');
-        const nextPt = { x: a.x * w, y: a.y * h };
-
-        if (activePathPoints.length > 0) {
-            const prevPt = activePathPoints[activePathPoints.length - 1];
-            ctx.beginPath();
-            ctx.moveTo(prevPt.x, prevPt.y);
-            ctx.lineTo(nextPt.x, nextPt.y);
-            ctx.strokeStyle = '#0f172a';
-            ctx.lineWidth = 3;
-            ctx.stroke();
+        if (currentPaths.length === 0) {
+            currentPaths.push([{ x: a.x * w, y: a.y * h }]);
+        } else {
+            currentPaths[currentPaths.length - 1].push({ x: a.x * w, y: a.y * h });
         }
-        activePathPoints.push(nextPt);
-        penStateLabel.textContent = `DRAWING: LINE (${a.x.toFixed(2)}, ${a.y.toFixed(2)})`;
+        penStateLabel.textContent = `DRAWING: LINE (${a.x.toFixed(3)}, ${a.y.toFixed(3)})`;
     } else if (a.type === 'PEN_UP') {
         stylus.classList.add('pen-up');
-        activePathPoints = [];
         penStateLabel.textContent = 'PEN UP: REPOSITIONING';
     } else if (a.type === 'END') {
         stylus.classList.add('pen-up');
         penStateLabel.textContent = 'FINISHED: END TOKEN';
     }
+
+    // Incremental or full redraw
+    redrawCanvasUpTo(idx + 1);
 
     // Append to live token feed
     appendTokenItem(a, idx);
@@ -287,7 +431,7 @@ function appendTokenItem(a, idx) {
 
     let coordsStr = '';
     if (a.x !== undefined && a.y !== undefined) {
-        coordsStr = `x:${a.x.toFixed(2)} y:${a.y.toFixed(2)}`;
+        coordsStr = `x:${a.x.toFixed(3)} y:${a.y.toFixed(3)}`;
     }
 
     div.innerHTML = `
@@ -358,7 +502,6 @@ async function loadShowcase() {
                 <div class="showcase-label">${it.category} #${it.id.split('_')[1]}</div>
             `;
             card.addEventListener('click', async () => {
-                // Fetch actions JSON and play on canvas
                 const jRes = await fetch(it.json_url);
                 if (!jRes.ok) return;
                 const d = await jRes.json();
@@ -366,7 +509,6 @@ async function loadShowcase() {
                 stopAnimation();
                 resetCanvas();
 
-                // Select category button
                 document.querySelectorAll('.category-btn').forEach(b => {
                     b.classList.toggle('active', b.dataset.cat === it.category);
                 });
@@ -377,7 +519,6 @@ async function loadShowcase() {
                 currentIndex = 0;
                 lastSvgContent = '';
 
-                // Fetch rendered SVG text
                 const sRes = await fetch(it.svg_url);
                 if (sRes.ok) lastSvgContent = await sRes.text();
 
@@ -399,5 +540,4 @@ async function loadShowcase() {
 // Initialize on page load
 setupCanvas();
 loadShowcase();
-// Start initial live drawing
 startNewDrawing();

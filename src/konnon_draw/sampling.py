@@ -33,12 +33,24 @@ def _sample(logits, allowed, temperature, top_k, gen):
     return int(idx[torch.multinomial(probs, 1, generator=gen)])
 
 
+def _continuous_coord(logits, selected_bin, num_bins=COORD_BINS, window=2, temp=0.5):
+    """Sub-bin continuous coordinate expectation in local neighborhood of selected bin."""
+    low = max(0, selected_bin - window)
+    high = min(num_bins - 1, selected_bin + window)
+    sub = logits[low : high + 1] / max(temp, 1e-4)
+    probs = torch.softmax(sub, dim=-1)
+    indices = torch.arange(low, high + 1, dtype=torch.float32, device=logits.device)
+    cont_bin = torch.sum(indices * probs).item()
+    return max(0.0, min(1.0, cont_bin / (num_bins - 1)))
+
+
 @torch.no_grad()
-def generate(model, class_id, seed, max_len=128, temperature=1.0, top_k=None):
+def generate(model, class_id, seed, max_len=128, temperature=1.0, top_k=None, continuous_coords=False):
     """Return dict(actions, class_id, natural_end, repaired, n_tokens, seed). `max_len` counts START and END."""
     model.eval()
     gen = torch.Generator().manual_seed(int(seed))
     ids, xs, ys = [int(A.START)], [NO_COORD], [NO_COORD]
+    cont_xs, cont_ys = [], []
     hidden, natural, forced = None, False, False
     cls = torch.tensor([int(class_id)])
     coord_bins = list(range(COORD_BINS))
@@ -59,6 +71,11 @@ def generate(model, class_id, seed, max_len=128, temperature=1.0, top_k=None):
             x = _sample(x_log[0, -1], coord_bins, temperature, top_k, gen)
             y_log = model.predict_y(h[:, -1], torch.tensor([x]))[0]
             y = _sample(y_log, coord_bins, temperature, top_k, gen)
+            if continuous_coords:
+                cont_x = _continuous_coord(x_log[0, -1], x)
+                cont_y = _continuous_coord(y_log, y)
+                cont_xs.append(cont_x)
+                cont_ys.append(cont_y)
         else:
             x = y = NO_COORD
         ids.append(a); xs.append(x); ys.append(y)
@@ -69,6 +86,13 @@ def generate(model, class_id, seed, max_len=128, temperature=1.0, top_k=None):
             ids.pop(); xs.pop(); ys.pop()
         ids.append(int(A.END)); xs.append(NO_COORD); ys.append(NO_COORD)
     actions = decode_one(ids, xs, ys)
+    if continuous_coords and cont_xs and cont_ys:
+        c_idx = 0
+        for act in actions:
+            if act["type"] in ("MOVE", "LINE") and c_idx < len(cont_xs):
+                act["x"] = round(cont_xs[c_idx], 5)
+                act["y"] = round(cont_ys[c_idx], 5)
+                c_idx += 1
     return {"seed": int(seed), "class_id": int(class_id), "actions": actions, "natural_end": natural,
             "repaired": repaired, "n_tokens": len(ids)}
 
