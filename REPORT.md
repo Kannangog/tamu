@@ -2,8 +2,8 @@
 
 **Date**: 2026-10-26  
 **Hardware Profile**: Windows Laptop, AMD Ryzen 5 5000-series (6 cores / 12 threads), 8 GB RAM, CPU-only execution  
-**Test Suite**: 85 passed in 21.84s  
-**Active Baseline Commit**: `d91034b`  
+**Test Suite**: 111 passed in 13.77s  
+**Active Baseline Commit**: `64e32e5`  
 
 ---
 
@@ -241,7 +241,7 @@ The v1 model drew simple doodles on a 64×64 quantized grid with a single-width 
 - **Brush & Rendering Engine (`src/konnon_draw/renderer_v2.py`)**:
   - `render_document_v2(doc, width, height, supersample, seed)`: 2x supersampled rasterizer.
   - `export_svg_v2(doc, width, height)`: Clean standalone SVG export.
-  - Optimized CPU performance: 1,000 variable-width spline strokes render in **4.45s** on CPU.
+  - Render Performance Benchmark: 1,000 variable-width spline strokes render in **4.45s** at 1024×1024 resolution with 2× supersampling before PIL draw context batching (and in **1.82s** at 512×512 resolution with batched PIL context caching via `ensure_pil`).
   - Strictly deterministic: identical random seeds produce pixel-exact identical output.
 - **Artist Skill Library (`src/konnon_draw/artist_skills.py`)**:
   - Geometry: `make_ellipse`, `make_arc`, `make_wobbly_contour`, `make_symmetric_stroke`, `make_perspective_grid`, `make_proportion_guides`.
@@ -491,7 +491,7 @@ All metrics reported below were directly executed and measured on the target hos
 | Component / Benchmark | Target / Gate | Real Measured Performance | Memory Footprint (RSS) |
 |---|---|---|---|
 | **Test Suite** | 100% Green (107+ tests) | **111 passed in 13.90s** | 148.0 MB |
-| **1,000 Spline Render** | $< 10.0\text{s}$ | **1.82s** on CPU | 118.4 MB |
+| **1,000 Spline Render** | $< 10.0\text{s}$ | **1.82s** (512×512 batched) / **4.45s** (1024×1024 2× SS) | 118.4 MB |
 | **Brush Swatches (1200×800)** | Visual proof | **2.51s** (`outputs/hand/swatches.png`) | 124.0 MB |
 | **Gate 2 Proof Pieces (4 pieces)** | 3D Perspective + Loomis | **8.42s** (`outputs/hand_demos/gate2_contact_sheet.png`) | 134.2 MB |
 | **Gym Data Generation** | 180 Staged Transitions | **24.08s** (~0.13s / transition) | 182.5 MB |
