@@ -1,0 +1,16 @@
+{
+  "model_name": "Konnon Drawing Model v0.1",
+  "hidden_dim": 128,
+  "embedding_dim": 32,
+  "batch_size": 8,
+  "max_len": 128,
+  "learning_rate": 0.001,
+  "epochs": 20,
+  "seed": 42,
+  "coord_bins": 32,
+  "canvas_size": 256,
+  "optimizer": "AdamW",
+  "weight_decay": 0.0001,
+  "grad_clip_norm": 1.0,
+  "device": "cpu"
+}
