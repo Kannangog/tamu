@@ -115,6 +115,7 @@ def generate_staged_gym_data(
 
             item_record = {
                 "sample_id": f"{i}_{stg_idx}",
+                "drawing_id": f"drawing_{i}",
                 "category": cat,
                 "caption": caption,
                 "stage_idx": stg_idx,
@@ -155,3 +156,41 @@ def generate_staged_gym_data(
 
     print(f"Saved manifest: {man_p}")
     return all_dataset_items
+
+
+def split_staged_dataset_by_drawing(
+    items: List[Dict[str, Any]],
+    train_frac: float = 0.90,
+    val_frac: float = 0.05,
+    test_frac: float = 0.05,
+    seed: int = 42,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Splits staged transitions strictly by drawing ID so all stages of a drawing stay in the same split."""
+    drawing_to_items: Dict[str, List[Dict[str, Any]]] = {}
+    for it in items:
+        did = it.get("drawing_id", it["sample_id"].split("_")[0])
+        if did not in drawing_to_items:
+            drawing_to_items[did] = []
+        drawing_to_items[did].append(it)
+
+    unique_drawings = sorted(list(drawing_to_items.keys()))
+    rng = random.Random(seed)
+    rng.shuffle(unique_drawings)
+
+    n_total = len(unique_drawings)
+    n_train = int(round(n_total * train_frac))
+    n_val = int(round(n_total * val_frac))
+    if n_val < 1 and val_frac > 0 and n_total > 1:
+        n_val = 1
+    if n_train + n_val >= n_total and n_total > 2:
+        n_train = n_total - n_val - 1
+
+    train_ids = set(unique_drawings[:n_train])
+    val_ids = set(unique_drawings[n_train : n_train + n_val])
+    test_ids = set(unique_drawings[n_train + n_val :])
+
+    train_items = [it for did in train_ids for it in drawing_to_items[did]]
+    val_items = [it for did in val_ids for it in drawing_to_items[did]]
+    test_items = [it for did in test_ids for it in drawing_to_items[did]]
+
+    return train_items, val_items, test_items
