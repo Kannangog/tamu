@@ -45,7 +45,7 @@ DEFAULT_CATEGORIES = [
     # Animals
     "cat", "dog", "bird", "fish", "horse", "elephant", "rabbit", "butterfly", "lion", "bear",
     # Vehicles & Transport
-    "airplane", "bicycle", "car", "bus", "sailboat", "train", "truck", "motorcycle",
+    "airplane", "bicycle", "car", "bus", "sailboat", "train", "truck", "motorbike",
     # Architecture & Furniture & Objects
     "house", "chair", "table", "bed", "clock", "guitar", "camera", "cup", "tree", "flower",
     # Anatomy & Faces
@@ -109,7 +109,7 @@ def download_quickdraw_category(
     category: str,
     max_samples: int = 1500,
     raw_dir: Path = Path("data/raw/quickdraw"),
-) -> Path:
+) -> Optional[Path]:
     """Streams Quick, Draw! .ndjson directly from Google Cloud Storage."""
     raw_dir.mkdir(parents=True, exist_ok=True)
     dest_path = raw_dir / f"{category}.ndjson"
@@ -122,18 +122,24 @@ def download_quickdraw_category(
 
     print(f"  Downloading [{category}] from GCS ({max_samples} samples)...")
     valid_count = 0
-    with urllib.request.urlopen(req, timeout=30) as resp, open(dest_path, "w", encoding="utf-8") as out_f:
-        for line in resp:
-            try:
-                item = json.loads(line.decode("utf-8"))
-                # Filter for recognized quality sketches with valid stroke count
-                if item.get("recognized", False) and 4 <= len(item.get("drawing", [])) <= 60:
-                    out_f.write(json.dumps(item) + "\n")
-                    valid_count += 1
-                    if valid_count >= max_samples:
-                        break
-            except Exception:
-                continue
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp, open(dest_path, "w", encoding="utf-8") as out_f:
+            for line in resp:
+                try:
+                    item = json.loads(line.decode("utf-8"))
+                    # Filter for recognized quality sketches with valid stroke count
+                    if item.get("recognized", False) and 4 <= len(item.get("drawing", [])) <= 60:
+                        out_f.write(json.dumps(item) + "\n")
+                        valid_count += 1
+                        if valid_count >= max_samples:
+                            break
+                except Exception:
+                    continue
+    except Exception as e:
+        print(f"  Warning: failed to fetch [{category}] ({e}). Skipping.")
+        if dest_path.exists():
+            dest_path.unlink()
+        return None
 
     return dest_path
 
@@ -276,6 +282,9 @@ def ingest_all_quickdraw_staged(
 
     for cat_idx, cat in enumerate(categories):
         ndjson_p = download_quickdraw_category(cat, max_samples=drawings_per_cat + 200, raw_dir=raw_dir)
+        if not ndjson_p or not ndjson_p.exists() or ndjson_p.stat().st_size == 0:
+            print(f"  [{cat_idx+1:02d}/{len(categories):02d}] {cat:<12} -> SKIPPED")
+            continue
         cat_transitions, n_drawings = convert_category_to_staged(
             ndjson_path=ndjson_p,
             category=cat,
