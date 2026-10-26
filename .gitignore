@@ -32,6 +32,13 @@ env/
 data/raw/
 data/processed/
 outputs/checkpoints/
+outputs_qd/checkpoints/
+outputs/audit_qd_48/
+outputs_qd/samples/
+outputs_qd/eval_*/samples/
+outputs_qd/ab_test/plain/
+outputs_qd/ab_test/continuous/
+*.pt
 
 # IDE & OS
 .vscode/

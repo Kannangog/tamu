@@ -54,3 +54,11 @@ Temperature: 0.3-0.5 gives clean lines; 0.8+ gets wobbly (wheels especially). `-
 ## Layout
 `schema.py` actions + validator | `renderer.py` SVG | `objects_gen.py`, `data_gen.py` (toy shapes), `quickdraw.py` data |
 `encoding.py` | `model.py` | `training.py` | `sampling.py` | `evaluation.py` | `raster.py` | `tests/` (37 tests)
+
+## Dataset Attribution & Licensing
+- **Google Quick, Draw! Dataset**: The real stroke sequences used in `data/processed/quickdraw.jsonl` are sourced from the Quick, Draw! Dataset provided by **Google Creative Lab** under the **Creative Commons Attribution 4.0 International License (CC BY 4.0)**.
+  - Source: [Google Creative Lab Quick, Draw! Dataset](https://github.com/googlecreativelab/quickdraw-dataset)
+  - Raw Simplified NDJSON: `https://storage.googleapis.com/quickdraw_dataset/full/simplified/`
+  - Access Date: 26 October 2026
+  - Transformations & Filtering: Documented in [`data/manifests/quickdraw.manifest.json`](data/manifests/quickdraw.manifest.json).
+

@@ -52,6 +52,32 @@ def set_seed(seed):
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
 
 
+def get_peak_ram_mb():
+    try:
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            class PMC(ctypes.Structure):
+                _fields_ = [('cb', wintypes.DWORD), ('PageFaultCount', wintypes.DWORD),
+                            ('PeakWorkingSetSize', ctypes.c_size_t), ('WorkingSetSize', ctypes.c_size_t),
+                            ('QuotaPeakPagedPoolUsage', ctypes.c_size_t), ('QuotaPagedPoolUsage', ctypes.c_size_t),
+                            ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t), ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
+                            ('PagefileUsage', ctypes.c_size_t), ('PeakPagefileUsage', ctypes.c_size_t)]
+            pmc = PMC()
+            pmc.cb = ctypes.sizeof(PMC)
+            ctypes.windll.psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC), wintypes.DWORD]
+            ctypes.windll.psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+            handle = ctypes.windll.kernel32.GetCurrentProcess()
+            if ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb):
+                return pmc.PeakWorkingSetSize / (1024 * 1024)
+        else:
+            import resource
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    except Exception:
+        pass
+    return 0.0
+
+
 def git_commit():
     try:
         return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
@@ -192,9 +218,10 @@ def train(cfg: TrainConfig):
                 "valid_rate": f"{valid_rate:.3f}", "completion_rate": f"{completion_rate:.3f}",
                 "epoch_seconds": f"{secs:.1f}", "notes": cfg.notes})
             lf.flush()
+            ram_mb = get_peak_ram_mb()
             print(f"epoch {epoch:3d} | train {tr['loss']:.3f} | val {va['loss']:.3f} "
                   f"(act {va['action_loss']:.3f}, coord {va['coord_loss']:.3f}, acc {va['action_acc']:.2f}) "
-                  f"| valid {valid_rate:.2f} done {completion_rate:.2f} | {secs:.1f}s")
+                  f"| valid {valid_rate:.2f} done {completion_rate:.2f} | {secs:.1f}s | peak RAM {ram_mb:.1f} MB")
             if va["loss"] < best:
                 best = va["loss"]
                 save_checkpoint(out_dir / "checkpoints" / "best.pt", model, optimizer, epoch, cfg, ds_version, best, classes)
@@ -205,7 +232,7 @@ def train(cfg: TrainConfig):
             if epoch % cfg.sample_every == 0 or epoch == cfg.epochs:
                 for i, r in enumerate(samples):  # same fixed seeds every time
                     save_sample(out_dir / "samples" / f"epoch_{epoch:03d}", f"{classes[r['class_id']]}_{i}", r)
-    print(f"Best val loss {best:.4f}. Checkpoints in {out_dir / 'checkpoints'}; log at {log_path}")
+    print(f"Best val loss {best:.4f}. Peak RAM: {get_peak_ram_mb():.1f} MB. Checkpoints in {out_dir / 'checkpoints'}; log at {log_path}")
     return best
 
 

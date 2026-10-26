@@ -20,6 +20,8 @@ const playIcon = document.getElementById('playIcon');
 const playText = document.getElementById('playText');
 const btnStep = document.getElementById('btnStep');
 const btnReplay = document.getElementById('btnReplay');
+const btnSketch = document.getElementById('btnSketch');
+const btnComplete = document.getElementById('btnComplete');
 const btnClear = document.getElementById('btnClear');
 const speedSlider = document.getElementById('speedSlider');
 const speedLabel = document.getElementById('speedLabel');
@@ -110,6 +112,7 @@ if (chkContinuous) {
 // Clear Canvas
 btnClear.addEventListener('click', () => {
     stopAnimation();
+    if (isSketchMode) exitSketchMode();
     resetCanvas();
     currentActions = [];
     currentPaths = [];
@@ -131,12 +134,134 @@ function resetCanvas() {
     currentPaths = [];
 }
 
+// Collaborative Sketch Mode State
+let isSketchMode = false;
+let isDrawingStroke = false;
+let userPrefixActions = [];
+let userStrokeCount = 0;
+let lastDrawPt = null;
+
+function enterSketchMode() {
+    stopAnimation();
+    resetCanvas();
+    isSketchMode = true;
+    isDrawingStroke = false;
+    userPrefixActions = [];
+    userStrokeCount = 0;
+    lastDrawPt = null;
+
+    btnSketch.textContent = '❌ Cancel Sketch';
+    btnComplete.style.display = 'inline-flex';
+    btnPlayPause.disabled = true;
+    btnStep.disabled = true;
+    canvas.style.cursor = 'crosshair';
+
+    penStateLabel.textContent = 'SKETCH MODE: Draw 1-2 initial strokes with your mouse on the canvas';
+    tokenFeed.innerHTML = '<div style="color:var(--text-muted); text-align:center; padding: 20px 0;">Draw on the canvas. When ready, click "✨ Complete"</div>';
+}
+
+function exitSketchMode() {
+    isSketchMode = false;
+    isDrawingStroke = false;
+    canvas.style.cursor = 'default';
+    btnSketch.textContent = '✏️ Sketch Prefix';
+    btnComplete.style.display = 'none';
+    btnPlayPause.disabled = false;
+    btnStep.disabled = false;
+}
+
+if (btnSketch) {
+    btnSketch.addEventListener('click', () => {
+        if (!isSketchMode) {
+            enterSketchMode();
+        } else {
+            exitSketchMode();
+            penStateLabel.textContent = 'STATUS: IDLE';
+        }
+    });
+}
+
+if (btnComplete) {
+    btnComplete.addEventListener('click', () => {
+        if (!userPrefixActions.length) {
+            alert('Please draw at least one stroke before completing!');
+            return;
+        }
+        // Ensure last stroke has PEN_UP if user finished drawing
+        if (userPrefixActions[userPrefixActions.length - 1].type !== 'PEN_UP') {
+            userPrefixActions.push({ type: 'PEN_UP' });
+        }
+        const prefixToPass = [...userPrefixActions];
+        exitSketchMode();
+        startNewDrawing(prefixToPass);
+    });
+}
+
+function getCanvasPoint(e) {
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
+    return {
+        px: x,
+        py: y,
+        normX: Number((x / rect.width).toFixed(4)),
+        normY: Number((y / rect.height).toFixed(4))
+    };
+}
+
+canvas.addEventListener('mousedown', (e) => {
+    if (!isSketchMode) return;
+    isDrawingStroke = true;
+    const pt = getCanvasPoint(e);
+    lastDrawPt = pt;
+    userPrefixActions.push({ type: 'MOVE', x: pt.normX, y: pt.normY });
+
+    ctx.strokeStyle = '#6366f1';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.arc(pt.px, pt.py, 2, 0, Math.PI * 2);
+    ctx.fillStyle = '#6366f1';
+    ctx.fill();
+
+    appendTokenItem({ type: 'MOVE', x: pt.normX, y: pt.normY }, userPrefixActions.length - 1);
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    if (!isSketchMode || !isDrawingStroke || !lastDrawPt) return;
+    const pt = getCanvasPoint(e);
+    const dist = Math.hypot(pt.px - lastDrawPt.px, pt.py - lastDrawPt.py);
+    if (dist < 4) return; // avoid noisy identical points
+
+    userPrefixActions.push({ type: 'LINE', x: pt.normX, y: pt.normY });
+
+    ctx.beginPath();
+    ctx.moveTo(lastDrawPt.px, lastDrawPt.py);
+    ctx.lineTo(pt.px, pt.py);
+    ctx.stroke();
+
+    appendTokenItem({ type: 'LINE', x: pt.normX, y: pt.normY }, userPrefixActions.length - 1);
+    lastDrawPt = pt;
+});
+
+window.addEventListener('mouseup', () => {
+    if (!isSketchMode || !isDrawingStroke) return;
+    isDrawingStroke = false;
+    userPrefixActions.push({ type: 'PEN_UP' });
+    userStrokeCount++;
+    appendTokenItem({ type: 'PEN_UP' }, userPrefixActions.length - 1);
+    penStateLabel.textContent = `SKETCH MODE: ${userStrokeCount} stroke(s) drawn. Click "✨ Complete" or add another stroke!`;
+});
+
 // Fetch new drawing from model API
-async function startNewDrawing() {
+async function startNewDrawing(prefixActions = null) {
     stopAnimation();
     resetCanvas();
 
-    penStateLabel.textContent = 'NEURAL INFERENCE IN PROGRESS...';
+    penStateLabel.textContent = prefixActions ? 'AI COMPLETING USER SKETCH...' : 'NEURAL INFERENCE IN PROGRESS...';
     btnPlayPause.disabled = true;
 
     try {
@@ -148,6 +273,10 @@ async function startNewDrawing() {
             smooth: chkSmoothBezier ? chkSmoothBezier.checked : true,
             continuous: chkContinuous ? chkContinuous.checked : true,
         };
+
+        if (prefixActions && prefixActions.length > 0) {
+            payload.prefix = prefixActions;
+        }
 
         const res = await fetch('/api/generate', {
             method: 'POST',
@@ -176,6 +305,8 @@ async function startNewDrawing() {
     } catch (err) {
         console.error(err);
         penStateLabel.textContent = `ERROR: ${err.message}`;
+        btnPlayPause.disabled = false;
+    }
         btnPlayPause.disabled = false;
     }
 }

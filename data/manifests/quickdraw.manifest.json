@@ -1,0 +1,37 @@
+{
+  "source": "https://storage.googleapis.com/quickdraw_dataset/full/simplified/{}.ndjson",
+  "license": "CC BY 4.0 (Google Creative Lab) - attribution required; confirm at github.com/googlecreativelab/quickdraw-dataset",
+  "access_date": "2026-10-26",
+  "categories": [
+    "bicycle",
+    "bed",
+    "chair",
+    "table",
+    "house",
+    "car"
+  ],
+  "kept": {
+    "bicycle": 3000,
+    "bed": 3000,
+    "chair": 3000,
+    "table": 3000,
+    "house": 3000,
+    "car": 3000
+  },
+  "lines_read": {
+    "bicycle": 3090,
+    "bed": 3206,
+    "chair": 3270,
+    "table": 3145,
+    "house": 3079,
+    "car": 3420
+  },
+  "transforms": [
+    "recognized==True only",
+    "bbox centred, longest side -> 0.92 of canvas, 64 bins",
+    "consecutive points in the same bin merged",
+    "single-point strokes dropped",
+    "drawings longer than 160 tokens rejected"
+  ],
+  "split_note": "training.py splits by example; Quick, Draw! has no artist id, so splits may share style."
+}

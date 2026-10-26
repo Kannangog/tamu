@@ -80,3 +80,45 @@ def test_continuous_coordinates_generation():
     coords = [a["x"] for a in actions if a["type"] in ("MOVE", "LINE")]
     has_sub_bin = any(abs(x * 63.0 - round(x * 63.0)) > 1e-3 for x in coords)
     assert has_sub_bin, "Expected sub-bin continuous coordinates"
+
+
+def test_closed_loop_bezier_joins_cleanly():
+    # 8 points approximating a closed circle
+    import math
+    pts = [
+        (0.5 + 0.3 * math.cos(2 * math.pi * i / 8), 0.5 + 0.3 * math.sin(2 * math.pi * i / 8))
+        for i in range(8)
+    ]
+    pts.append(pts[0])  # explicitly closed loop
+    cmds = points_to_bezier_commands(pts, corner_threshold_deg=50.0)
+
+    assert len(cmds) == 8
+    # In a smooth circular loop, every command should be CUBIC
+    assert all(cmd[0] == "CUBIC" for cmd in cmds)
+    # Final segment endpoint must match the starting point
+    assert abs(cmds[-1][-2] - pts[0][0]) < 1e-5
+    assert abs(cmds[-1][-1] - pts[0][1]) < 1e-5
+
+
+def test_raw_json_unchanged_by_smoothing():
+    import copy
+    from konnon_draw.sampling import save_sample
+    raw_actions = [
+        {"type": "MOVE", "x": 0.2, "y": 0.2},
+        {"type": "LINE", "x": 0.4, "y": 0.5},
+        {"type": "LINE", "x": 0.7, "y": 0.8},
+        {"type": "END"},
+    ]
+    actions_copy = copy.deepcopy(raw_actions)
+    # Render with smooth=True
+    _ = render_svg(raw_actions, smooth=True)
+    # Verify raw actions dict was not modified in-place
+    assert raw_actions == actions_copy
+
+
+def test_corner_above_50_degrees_stays_straight():
+    # Two straight segments meeting at an acute angle (~60 degrees deviation)
+    pts = [(0.1, 0.1), (0.5, 0.5), (0.9, 0.1)]
+    cmds = points_to_bezier_commands(pts, corner_threshold_deg=50.0)
+    # A >50 deg turn must not be rounded into a single continuous curve
+    assert any(cmd[0] == "LINE" for cmd in cmds)

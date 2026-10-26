@@ -13,7 +13,7 @@ from typing import Optional
 import torch
 
 from .renderer import actions_to_bezier_segments, render_svg
-from .sampling import generate
+from .sampling import generate, generate_with_prefix
 from .training import load_model
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -27,8 +27,11 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
     checkpoint_path = ""
 
     def log_message(self, format, *args):
-        # Keep server log concise
-        sys.stderr.write(f"[{self.log_date_time_string()}] {args[0]} {args[1]} -> {args[2]}\n")
+        # Keep server log concise and robust
+        try:
+            sys.stderr.write(f"[{self.log_date_time_string()}] {self.address_string()} - {format % args}\n")
+        except Exception:
+            pass
 
     def send_json(self, data, status=HTTPStatus.OK):
         body = json.dumps(data).encode("utf-8")
@@ -121,6 +124,7 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
             top_k = payload.get("top_k", None)
             smooth = bool(payload.get("smooth", True))
             continuous = bool(payload.get("continuous", True))
+            prefix = payload.get("prefix", None)
 
             if top_k is not None:
                 top_k = int(top_k)
@@ -131,16 +135,28 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
             class_id = self.classes.index(category)
             max_len = self.ckpt.get("config", {}).get("max_len", 160)
 
-            # Autoregressive generation
-            res = generate(
-                model=self.model,
-                class_id=class_id,
-                seed=seed,
-                max_len=max_len,
-                temperature=temperature,
-                top_k=top_k,
-                continuous_coords=continuous,
-            )
+            # Autoregressive generation (with user prefix if provided)
+            if prefix and isinstance(prefix, list) and len(prefix) > 0:
+                res = generate_with_prefix(
+                    model=self.model,
+                    class_id=class_id,
+                    prefix_actions=prefix,
+                    seed=seed,
+                    max_len=max_len,
+                    temperature=temperature,
+                    top_k=top_k,
+                    continuous_coords=continuous,
+                )
+            else:
+                res = generate(
+                    model=self.model,
+                    class_id=class_id,
+                    seed=seed,
+                    max_len=max_len,
+                    temperature=temperature,
+                    top_k=top_k,
+                    continuous_coords=continuous,
+                )
 
             actions = res["actions"]
             svg_smooth = render_svg(actions, width=256, height=256, smooth=True)
@@ -155,6 +171,7 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
                 "top_k": top_k,
                 "smooth": smooth,
                 "continuous": continuous,
+                "user_stroke_count": res.get("user_stroke_count", 0),
                 "n_tokens": res.get("n_tokens", len(actions)),
                 "natural_end": res.get("natural_end", True),
                 "repaired": res.get("repaired", False),
@@ -214,10 +231,11 @@ def run_server(host: str = "127.0.0.1", port: int = 8080, checkpoint_path: str =
 
 
 def main():
+    default_ckpt = "outputs_qd/checkpoints/best.pt" if Path("outputs_qd/checkpoints/best.pt").exists() else "outputs/checkpoints/best.pt"
     parser = argparse.ArgumentParser(description="Start the Live Drawing Studio webview server.")
     parser.add_argument("--host", default="127.0.0.1", help="Host interface")
     parser.add_argument("--port", type=int, default=8080, help="Port to bind")
-    parser.add_argument("--checkpoint", default="outputs/checkpoints/best.pt", help="Path to checkpoint")
+    parser.add_argument("--checkpoint", default=default_ckpt, help="Path to checkpoint")
     args = parser.parse_args()
 
     run_server(host=args.host, port=args.port, checkpoint_path=args.checkpoint)

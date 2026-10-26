@@ -7,7 +7,7 @@ from pathlib import Path
 
 import torch
 
-from .encoding import decode_one
+from .encoding import decode_one, encode_one
 from .renderer import render_svg
 from .schema import Action, COORD_BINS, NO_COORD, is_valid
 
@@ -97,6 +97,84 @@ def generate(model, class_id, seed, max_len=128, temperature=1.0, top_k=None, co
             "repaired": repaired, "n_tokens": len(ids)}
 
 
+@torch.no_grad()
+def generate_with_prefix(model, class_id, prefix_actions, seed, max_len=128, temperature=1.0, top_k=None,
+                         continuous_coords=False):
+    """Autoregressively complete a drawing given a prefix of user actions.
+    Ensures valid constrained decoding, preserves user prefix strokes, and terminates cleanly.
+    """
+    model.eval()
+    gen = torch.Generator().manual_seed(int(seed))
+    cls = torch.tensor([int(class_id)])
+    coord_bins = list(range(COORD_BINS))
+
+    clean_prefix = [dict(a) for a in prefix_actions if a.get("type") not in ("START", "END")]
+    if not clean_prefix:
+        return generate(model, class_id, seed, max_len, temperature, top_k, continuous_coords=continuous_coords)
+
+    prefix_ids, prefix_xs, prefix_ys = encode_one(clean_prefix, add_start=True)
+    ids = list(prefix_ids)
+    xs = list(prefix_xs)
+    ys = list(prefix_ys)
+
+    hidden = None
+    for i in range(len(ids) - 1):
+        a_in = torch.tensor([[ids[i]]]); x_in = torch.tensor([[xs[i]]]); y_in = torch.tensor([[ys[i]]])
+        _, _, _, hidden = model(a_in, x_in, y_in, cls, hidden)
+
+    cont_xs, cont_ys = [], []
+    natural, forced = False, False
+
+    while len(ids) < max_len:
+        a_in = torch.tensor([[ids[-1]]]); x_in = torch.tensor([[xs[-1]]]); y_in = torch.tensor([[ys[-1]]])
+        a_log, x_log, h, hidden = model(a_in, x_in, y_in, cls, hidden)
+        allowed = LEGAL[ids[-1]]
+        if len(ids) == max_len - 1:
+            if int(A.END) not in allowed:
+                break
+            allowed, forced = [int(A.END)], True
+        a = _sample(a_log[0, -1], allowed, temperature, top_k, gen)
+        if a == int(A.END):
+            ids.append(a); xs.append(NO_COORD); ys.append(NO_COORD)
+            natural = not forced
+            break
+        if a in (int(A.MOVE), int(A.LINE)):
+            x = _sample(x_log[0, -1], coord_bins, temperature, top_k, gen)
+            y_log = model.predict_y(h[:, -1], torch.tensor([x]))[0]
+            y = _sample(y_log, coord_bins, temperature, top_k, gen)
+            if continuous_coords:
+                cont_x = _continuous_coord(x_log[0, -1], x)
+                cont_y = _continuous_coord(y_log, y)
+                cont_xs.append(cont_x)
+                cont_ys.append(cont_y)
+        else:
+            x = y = NO_COORD
+        ids.append(a); xs.append(x); ys.append(y)
+
+    repaired = forced
+    if not natural and not forced:
+        repaired = True
+        while len(ids) > 1 and ids[-1] != int(A.LINE):
+            ids.pop(); xs.pop(); ys.pop()
+        ids.append(int(A.END)); xs.append(NO_COORD); ys.append(NO_COORD)
+
+    decoded = decode_one(ids, xs, ys)
+    num_user = len(clean_prefix)
+    out_actions = [dict(u) for u in clean_prefix]
+
+    c_idx = 0
+    for act in decoded[num_user:]:
+        act_copy = dict(act)
+        if continuous_coords and act_copy["type"] in ("MOVE", "LINE") and c_idx < len(cont_xs):
+            act_copy["x"] = round(cont_xs[c_idx], 5)
+            act_copy["y"] = round(cont_ys[c_idx], 5)
+            c_idx += 1
+        out_actions.append(act_copy)
+
+    return {"seed": int(seed), "class_id": int(class_id), "actions": out_actions, "natural_end": natural,
+            "repaired": repaired, "n_tokens": len(ids), "user_stroke_count": num_user}
+
+
 def random_baseline(seed, max_len=128):
     """Uniform-random action baseline for release gate 2."""
     rng = random.Random(seed)
@@ -112,11 +190,11 @@ def random_baseline(seed, max_len=128):
     return actions
 
 
-def save_sample(out_dir, name, result):
+def save_sample(out_dir, name, result, smooth=False):
     out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{name}.json").write_text(json.dumps(result, indent=1), encoding="utf-8")
     if is_valid(result["actions"]):
-        (out_dir / f"{name}.svg").write_text(render_svg(result["actions"]), encoding="utf-8")
+        (out_dir / f"{name}.svg").write_text(render_svg(result["actions"], smooth=smooth), encoding="utf-8")
 
 
 def main(argv=None):
@@ -129,6 +207,8 @@ def main(argv=None):
     p.add_argument("--temperature", type=float, default=0.4)
     p.add_argument("--top-k", type=int, default=None)
     p.add_argument("--max-len", type=int, default=None)
+    p.add_argument("--smooth", action="store_true", help="export SVG with Catmull-Rom Bézier smoothing")
+    p.add_argument("--continuous", action="store_true", help="use continuous sub-bin coordinate interpolation")
     p.add_argument("--out", default="outputs/samples/generated")
     args = p.parse_args(argv)
     model, ckpt = load_model(args.checkpoint)
@@ -140,9 +220,10 @@ def main(argv=None):
         if name not in classes:
             raise SystemExit(f"Unknown category {name!r}. Available: {classes}")
         for i in range(args.n):
-            r = generate(model, classes.index(name), args.seed + i, max_len, args.temperature, args.top_k)
+            r = generate(model, classes.index(name), args.seed + i, max_len, args.temperature, args.top_k,
+                         continuous_coords=args.continuous)
             r["category"] = name; r["valid"] = is_valid(r["actions"]); ok += r["valid"]; total += 1
-            save_sample(args.out, f"{name}_{i:03d}", r)
+            save_sample(args.out, f"{name}_{i:03d}", r, smooth=args.smooth)
     print(f"Wrote {total} samples to {args.out} ({ok} valid)")
 
 

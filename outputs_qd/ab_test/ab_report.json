@@ -1,0 +1,24 @@
+{
+  "n_samples": 96,
+  "temperature": 0.4,
+  "seed": 2026,
+  "plain_metrics": {
+    "validity": 1.0,
+    "natural_completion": 0.8333333333333334,
+    "knn_recognizability": 0.8229166666666666,
+    "mean_path_length": 4.645407388389473,
+    "mean_sub_bin_fraction": 0.0
+  },
+  "continuous_metrics": {
+    "validity": 1.0,
+    "natural_completion": 0.8333333333333334,
+    "knn_recognizability": 0.8541666666666666,
+    "mean_path_length": 4.596365965667998,
+    "mean_sub_bin_fraction": 0.9975431700126351
+  },
+  "delta": {
+    "knn_recognizability": 0.0312,
+    "sub_bin_fraction": 0.9975,
+    "path_length": -0.049
+  }
+}
