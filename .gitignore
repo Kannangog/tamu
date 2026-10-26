@@ -33,9 +33,15 @@ data/raw/
 data/processed/
 outputs/checkpoints/
 outputs_qd/checkpoints/
+outputs_qd_h384/checkpoints/
+outputs_qd_skip/checkpoints/
 outputs/audit_qd_48/
 outputs_qd/samples/
+outputs_qd_h384/samples/
+outputs_qd_skip/samples/
 outputs_qd/eval_*/samples/
+outputs_qd_h384/eval_*/samples/
+outputs_qd_skip/eval_*/samples/
 outputs_qd/ab_test/plain/
 outputs_qd/ab_test/continuous/
 *.pt

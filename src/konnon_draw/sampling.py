@@ -69,7 +69,7 @@ def generate(model, class_id, seed, max_len=128, temperature=1.0, top_k=None, co
             break
         if a in (int(A.MOVE), int(A.LINE)):
             x = _sample(x_log[0, -1], coord_bins, temperature, top_k, gen)
-            y_log = model.predict_y(h[:, -1], torch.tensor([x]))[0]
+            y_log = model.predict_y(h[:, -1], torch.tensor([x]), cls)[0]
             y = _sample(y_log, coord_bins, temperature, top_k, gen)
             if continuous_coords:
                 cont_x = _continuous_coord(x_log[0, -1], x)
@@ -140,7 +140,7 @@ def generate_with_prefix(model, class_id, prefix_actions, seed, max_len=128, tem
             break
         if a in (int(A.MOVE), int(A.LINE)):
             x = _sample(x_log[0, -1], coord_bins, temperature, top_k, gen)
-            y_log = model.predict_y(h[:, -1], torch.tensor([x]))[0]
+            y_log = model.predict_y(h[:, -1], torch.tensor([x]), cls)[0]
             y = _sample(y_log, coord_bins, temperature, top_k, gen)
             if continuous_coords:
                 cont_x = _continuous_coord(x_log[0, -1], x)

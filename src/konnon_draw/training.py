@@ -46,6 +46,7 @@ class TrainConfig:
     sample_every: int = 5
     eval_samples: int = 4  # per class
     notes: str = ""
+    class_skip: bool = False
 
 
 def set_seed(seed):
@@ -110,7 +111,7 @@ def batch_loss(model, batch, coord_smooth=1.0):
     """Masked losses. Action loss ignores PAD; coord loss only where the target is MOVE/LINE."""
     in_a, in_x, in_y, t_a, t_x, t_y, cls = batch
     a_log, x_log, h, _ = model(in_a, in_x, in_y, cls)
-    y_log = model.predict_y(h, t_x)  # y head conditioned on the true x (teacher forcing)
+    y_log = model.predict_y(h, t_x, cls)  # y head conditioned on the true x (teacher forcing)
     valid = t_a != int(Action.PAD)
     coord = (t_a == int(Action.MOVE)) | (t_a == int(Action.LINE))
     action_loss = F.cross_entropy(a_log[valid], t_a[valid])
@@ -187,7 +188,7 @@ def train(cfg: TrainConfig):
         "train_ids": [i["id"] for i in train_items], "val_ids": [i["id"] for i in val_items]}))
     print(f"Data: {len(train_items)} train / {len(val_items)} val (skipped {skipped}); classes {classes}; dataset {ds_version}")
 
-    model = DrawingGRU(len(classes), cfg.embedding_dim, cfg.hidden_dim)
+    model = DrawingGRU(len(classes), cfg.embedding_dim, cfg.hidden_dim, class_skip=cfg.class_skip)
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     import math
     sched = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda e: cfg.lr_final_frac + (1 - cfg.lr_final_frac) * 0.5 * (1 + math.cos(math.pi * min(e, cfg.epochs) / cfg.epochs)))
@@ -239,7 +240,10 @@ def train(cfg: TrainConfig):
 def main(argv=None):
     p = argparse.ArgumentParser(description="Train the Konnon drawing GRU")
     for f, v in asdict(TrainConfig()).items():
-        p.add_argument("--" + f.replace("_", "-"), type=type(v), default=v)
+        if isinstance(v, bool):
+            p.add_argument("--" + f.replace("_", "-"), action="store_true", default=v)
+        else:
+            p.add_argument("--" + f.replace("_", "-"), type=type(v), default=v)
     args = p.parse_args(argv)
     train(TrainConfig(**{k.replace("-", "_"): v for k, v in vars(args).items()}))
 

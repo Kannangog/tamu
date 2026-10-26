@@ -1,0 +1,99 @@
+{
+  "checkpoint": "outputs_qd_skip/checkpoints/best.pt",
+  "epoch": 9,
+  "classes": [
+    "bed",
+    "bicycle",
+    "car",
+    "chair",
+    "house",
+    "table"
+  ],
+  "temperature": 0.5,
+  "samples_per_class": 16,
+  "first_seed": 1000,
+  "best_val_loss": 2.9846586142685316,
+  "render_validity_rate": 1.0,
+  "completion_rate_natural_end": 0.8854166666666666,
+  "random_baseline_validity_rate": 0.15625,
+  "knn_recognizability_generated": 0.7604166666666666,
+  "knn_recognizability_reference_heldout_real": 0.8529629629629629,
+  "heldout_to_train_nn_dist": 8.441743850708008,
+  "per_class": {
+    "bed": {
+      "validity": 1.0,
+      "natural_end": 0.875,
+      "fallback_used": 0.125,
+      "mean_actions": 88.625,
+      "mean_paths": 4.75,
+      "diversity": 12.03445816040039,
+      "knn_recognized_as_requested": 0.875,
+      "nn_dist_to_train": 8.493431091308594,
+      "reference_train_diversity": 12.155959129333496
+    },
+    "bicycle": {
+      "validity": 1.0,
+      "natural_end": 0.6875,
+      "fallback_used": 0.3125,
+      "mean_actions": 116.0625,
+      "mean_paths": 9.1875,
+      "diversity": 12.468607902526855,
+      "knn_recognized_as_requested": 0.6875,
+      "nn_dist_to_train": 9.639585494995117,
+      "reference_train_diversity": 12.57575798034668
+    },
+    "car": {
+      "validity": 1.0,
+      "natural_end": 0.8125,
+      "fallback_used": 0.1875,
+      "mean_actions": 93.8125,
+      "mean_paths": 6.25,
+      "diversity": 12.482964515686035,
+      "knn_recognized_as_requested": 0.6875,
+      "nn_dist_to_train": 9.020177841186523,
+      "reference_train_diversity": 11.322240829467773
+    },
+    "chair": {
+      "validity": 1.0,
+      "natural_end": 1.0,
+      "fallback_used": 0.0,
+      "mean_actions": 53.375,
+      "mean_paths": 3.8125,
+      "diversity": 12.950276374816895,
+      "knn_recognized_as_requested": 1.0,
+      "nn_dist_to_train": 8.619283676147461,
+      "reference_train_diversity": 11.742356300354004
+    },
+    "house": {
+      "validity": 1.0,
+      "natural_end": 0.9375,
+      "fallback_used": 0.0625,
+      "mean_actions": 61.125,
+      "mean_paths": 4.25,
+      "diversity": 13.851344108581543,
+      "knn_recognized_as_requested": 0.6875,
+      "nn_dist_to_train": 9.589229583740234,
+      "reference_train_diversity": 12.686110496520996
+    },
+    "table": {
+      "validity": 1.0,
+      "natural_end": 1.0,
+      "fallback_used": 0.0,
+      "mean_actions": 47.3125,
+      "mean_paths": 4.375,
+      "diversity": 12.508393287658691,
+      "knn_recognized_as_requested": 0.625,
+      "nn_dist_to_train": 8.501982688903809,
+      "reference_train_diversity": 11.73918628692627
+    }
+  },
+  "gates": {
+    "0_data_renderer": "18000/18000 examples parse and render (run pytest for unit tests)",
+    "1_training": "no NaN in log",
+    "2_generation": "PASS",
+    "3_generalization": "held-out split: val loss, kNN reference and NN distance reported; unseen categories not tested",
+    "4_export": "96/96 saved JSON re-render to identical SVG",
+    "5_governance": "manual review required before any public release"
+  },
+  "notes": "kNN recognizability = nearest-neighbour vote of rasterised samples against training drawings; a proxy for 'does it look like the requested category', not a human rating."
+}
