@@ -199,11 +199,21 @@ def train_scaled_model(
     eos_weight: float = 4.0,
     seed: int = 42,
     resume: bool = True,
+    device: Optional[str] = None,
+    d_model: int = 128,
+    n_layers: int = 3,
+    n_heads: int = 4,
+    d_ff: int = 384,
+    fp16: Optional[bool] = None,
 ) -> Dict[str, Any]:
     torch.manual_seed(seed)
     np.random.seed(seed)
     process = psutil.Process()
-    device = "cpu"
+
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    if fp16 is None:
+        fp16 = True if str(device).startswith("cuda") else False
 
     out_p = Path(out_dir) / ablation
     out_p.mkdir(parents=True, exist_ok=True)
@@ -213,7 +223,8 @@ def train_scaled_model(
 
     print("=" * 70)
     print(f"STEP 5: TRAINING STAGED MODEL [{ablation.upper()}] (resumable, min {min_epochs} ep)")
-    print(f"Data: {data_dir} | Batch Size: {batch_size} | LR: {lr} | EOS Weight: {eos_weight}")
+    print(f"Device: {device} (FP16: {fp16}) | Data: {data_dir} | Batch Size: {batch_size} | LR: {lr} | EOS Weight: {eos_weight}")
+    print(f"Architecture: d_model={d_model}, n_layers={n_layers}, n_heads={n_heads}, d_ff={d_ff}")
     print("=" * 70)
 
     # 1. Load Data
@@ -241,14 +252,13 @@ def train_scaled_model(
     probe_items = val_items[:32]
 
     # 2. Initialize Model & Text Tower
-    d_model = 128
     text_encoder = FrozenTextEncoder(model_type="builtin", d_model=d_model, device=device)
     model = KonnonStagedTransformer(
         vocab_size=VOCAB_SIZE,
         d_model=d_model,
-        n_layers=3,
-        n_heads=4,
-        d_ff=384,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        d_ff=d_ff,
         max_seq_len=max_seq_len,
         canvas_res=canvas_res,
         dropout=0.05,
@@ -261,6 +271,7 @@ def train_scaled_model(
 
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1.0e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs, eta_min=1.0e-5)
+    scaler = torch.cuda.amp.GradScaler(enabled=fp16)
 
     start_epoch = 1
     best_val_loss = float("inf")
@@ -321,21 +332,23 @@ def train_scaled_model(
             optimizer.zero_grad()
             text_emb = get_cached_text_embeddings(captions)
 
-            ctx = model.build_multimodal_context(
-                text_embeddings=text_emb,
-                canvas=canvases,
-                stage_idx=stages,
-            )
-
-            logits, _, _ = model(inputs, context=ctx)
-            loss = criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
+            with torch.cuda.amp.autocast(enabled=fp16):
+                ctx = model.build_multimodal_context(
+                    text_embeddings=text_emb,
+                    canvas=canvases,
+                    stage_idx=stages,
+                )
+                logits, _, _ = model(inputs, context=ctx)
+                loss = criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
 
             if not torch.isfinite(loss):
                 continue
 
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             train_loss_accum += float(loss.item())
             train_batches += 1
@@ -368,14 +381,14 @@ def train_scaled_model(
                 targets = tokens[:, 1:]
 
                 text_emb = get_cached_text_embeddings(captions)
-                ctx = model.build_multimodal_context(
-                    text_embeddings=text_emb,
-                    canvas=canvases,
-                    stage_idx=stages,
-                )
-
-                logits, _, _ = model(inputs, context=ctx)
-                v_loss = criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
+                with torch.cuda.amp.autocast(enabled=fp16):
+                    ctx = model.build_multimodal_context(
+                        text_embeddings=text_emb,
+                        canvas=canvases,
+                        stage_idx=stages,
+                    )
+                    logits, _, _ = model(inputs, context=ctx)
+                    v_loss = criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
 
                 if torch.isfinite(v_loss):
                     val_loss_accum += float(v_loss.item())
@@ -435,9 +448,9 @@ def train_scaled_model(
             "history": history,
             "config": {
                 "d_model": d_model,
-                "n_layers": 3,
-                "n_heads": 4,
-                "d_ff": 384,
+                "n_layers": n_layers,
+                "n_heads": n_heads,
+                "d_ff": d_ff,
                 "max_seq_len": max_seq_len,
                 "canvas_res": canvas_res,
                 "vocab_size": VOCAB_SIZE,
@@ -484,7 +497,16 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1.0e-3)
     parser.add_argument("--no_resume", action="store_true")
+    parser.add_argument("--device", type=str, default=None, help="Device to use ('cuda', 'cpu')")
+    parser.add_argument("--d_model", type=int, default=128)
+    parser.add_argument("--n_layers", type=int, default=3)
+    parser.add_argument("--n_heads", type=int, default=4)
+    parser.add_argument("--d_ff", type=int, default=384)
+    parser.add_argument("--fp16", action="store_true", help="Force FP16 mixed precision")
+    parser.add_argument("--no_fp16", action="store_true", help="Disable FP16 mixed precision")
     args = parser.parse_args()
+
+    fp16_val = False if args.no_fp16 else (True if args.fp16 else None)
 
     train_scaled_model(
         ablation=args.ablation,
@@ -492,4 +514,10 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         lr=args.lr,
         resume=not args.no_resume,
+        device=args.device,
+        d_model=args.d_model,
+        n_layers=args.n_layers,
+        n_heads=args.n_heads,
+        d_ff=args.d_ff,
+        fp16=fp16_val,
     )
