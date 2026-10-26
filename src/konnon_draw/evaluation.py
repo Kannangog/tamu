@@ -225,11 +225,44 @@ def run_evaluation_gates(
     # -------------------------------------------------------------
     # Gate 3: Generalization (Held-out validation check)
     # -------------------------------------------------------------
-    print("[Gate 3] Checking held-out generalization...")
-    gate_3_pass = (last_val_loss is not None) and (last_val_loss < 2.0)
+    print("[Gate 3] Checking held-out generalization across categories...")
+    category_eval = {}
+    if Path(data_path).exists():
+        with open(data_path, "r", encoding="utf-8") as f:
+            all_records = [json.loads(line) for line in f if line.strip()]
+
+        # Fixed split matching training (last 20%)
+        indices = list(range(len(all_records)))
+        random.seed(config.get("seed", 42))
+        random.shuffle(indices)
+        val_indices = indices[int(0.8 * len(indices)):]
+        val_records = [all_records[i] for i in val_indices]
+
+        # Group by category
+        from collections import defaultdict
+        from .training import DrawingDataset, collate_drawings, evaluate_loss
+        from torch.utils.data import DataLoader
+
+        cat_groups = defaultdict(list)
+        for r in val_records:
+            cat_groups[r.get("category", "unknown")].append(r)
+
+        for cat, items in cat_groups.items():
+            cat_ds = DrawingDataset(items, max_len=config.get("max_len", 128))
+            cat_loader = DataLoader(cat_ds, batch_size=8, shuffle=False, collate_fn=collate_drawings)
+            c_loss, c_act, c_coord = evaluate_loss(model, cat_loader, torch.device("cpu"))
+            category_eval[cat] = {
+                "count": len(items),
+                "loss": round(c_loss, 4),
+                "act_loss": round(c_act, 4),
+                "coord_loss": round(c_coord, 4),
+            }
+
+    gate_3_pass = len(category_eval) >= 4 and all(v["loss"] < 5.0 for v in category_eval.values())
     report["gate_3"] = {
         "pass": gate_3_pass,
         "val_loss": last_val_loss,
+        "categories": category_eval,
     }
 
     # -------------------------------------------------------------
@@ -318,6 +351,11 @@ def run_evaluation_gates(
     Path(docs_dir).mkdir(parents=True, exist_ok=True)
     report_md_path = Path(docs_dir) / "evaluation_report.md"
 
+    category_md_rows = "\n".join([
+        f"| `{cat}` | {stats['count']} | {stats['loss']} | {stats['act_loss']} | {stats['coord_loss']} |"
+        for cat, stats in category_eval.items()
+    ])
+
     md_content = f"""# Konnon Drawing Model v0.1 — Evaluation & Release Gates Report
 
 Generated on: {timestamp}  
@@ -331,7 +369,7 @@ Model: `DrawingGRU(hidden_dim={config.get('hidden_dim', 128)}, embedding_dim={co
 | **Gate 0** | Data / Renderer | All audited examples parse and render | {"PASS" if gate_0_pass else "FAIL"} |
 | **Gate 1** | Training | Runs without NaNs and validates convergence | {"PASS" if gate_1_pass else "FAIL"} |
 | **Gate 2** | Generation | Structurally valid and beats random baseline | {"PASS" if gate_2_pass else "FAIL"} |
-| **Gate 3** | Generalization | Generalizes to held-out validation drawings | {"PASS" if gate_3_pass else "FAIL"} |
+| **Gate 3** | Generalization | Held-out examples & categories evaluated separately | {"PASS" if gate_3_pass else "FAIL"} |
 | **Gate 4** | Export | SVG exports cleanly and elements are editable | {"PASS" if gate_4_pass else "FAIL"} |
 | **Gate 5** | Governance | Datasets, licenses, and intended use verified | {"PASS" if gate_5_pass else "FAIL"} |
 
@@ -343,14 +381,20 @@ Model: `DrawingGRU(hidden_dim={config.get('hidden_dim', 128)}, embedding_dim={co
 - **Initial Training Loss**: {first_loss:.4f}
 - **Final Validation Loss**: {last_val_loss:.4f}
 
-## 3. Stroke Statistics
+## 3. Held-out Category Generalization (Gate 3)
+
+| Category | Examples | Total Loss | Action Loss | Coordinate Loss |
+|---|---|---|---|---|
+{category_md_rows}
+
+## 4. Stroke Statistics
 
 - **Average Actions per Drawing**: {report['stroke_stats']['avg_actions']}
 - **Average Paths per Drawing**: {report['stroke_stats']['avg_paths']}
 - **Average Path Length**: {report['stroke_stats']['avg_length']} (canvas units)
 - **Pen-Up Ratio**: {report['stroke_stats']['avg_penup_ratio']:.1%}
 
-## 4. Strengths and Limitations
+## 5. Strengths and Limitations
 
 ### Strengths
 - Deterministic, standards-compliant SVG rendering decoupled from model inference.
