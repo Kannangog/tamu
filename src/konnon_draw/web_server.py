@@ -47,6 +47,33 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
     staged_ckpt_path = None
 
     @classmethod
+    def get_gru_model(cls):
+        if cls.model is None:
+            cands = [
+                PROJECT_ROOT / "outputs_qd" / "checkpoints" / "best.pt",
+                PROJECT_ROOT / "outputs" / "checkpoints" / "best.pt",
+                PROJECT_ROOT / "outputs_qd_h384" / "checkpoints" / "best.pt",
+            ]
+            for cand in cands:
+                if cand.exists():
+                    try:
+                        raw = torch.load(str(cand), map_location="cpu")
+                        if "model_config" in raw:
+                            from .model.gru import DrawingGRU
+                            m = DrawingGRU(**raw["model_config"])
+                            m.load_state_dict(raw["model_state"])
+                            m.eval()
+                            cls.model = m
+                            cls.ckpt = raw
+                            cls.classes = raw.get("classes", ["bed", "bicycle", "car", "chair", "house", "table"])
+                            if not cls.checkpoint_path:
+                                cls.checkpoint_path = str(cand)
+                            break
+                    except Exception:
+                        pass
+        return cls.model, cls.ckpt, cls.classes
+
+    @classmethod
     def get_staged_model(cls):
         if cls.staged_model is None:
             candidates = [
@@ -121,13 +148,14 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/status":
+            gru_model, gru_ckpt, gru_classes = self.get_gru_model()
             stg_model, _ = self.get_staged_model()
             self.send_json({
                 "status": "ready",
-                "checkpoint": str(self.checkpoint_path),
-                "classes": self.classes,
-                "hidden_dim": self.ckpt.get("config", {}).get("hidden_dim", 256) if self.ckpt else 256,
-                "parameters": self.model.num_parameters() if hasattr(self.model, "num_parameters") else 390000,
+                "checkpoint": str(self.checkpoint_path) if self.checkpoint_path else (str(self.staged_ckpt_path) if self.staged_ckpt_path else "ready"),
+                "classes": gru_classes or self.classes or ["bed", "bicycle", "car", "chair", "house", "table"],
+                "hidden_dim": gru_ckpt.get("config", {}).get("hidden_dim", 256) if gru_ckpt else 256,
+                "parameters": gru_model.num_parameters() if (gru_model and hasattr(gru_model, "num_parameters")) else 390000,
                 "staged_model_ready": stg_model is not None,
                 "staged_checkpoint": str(self.staged_ckpt_path) if self.staged_ckpt_path else None,
                 "staged_parameters": sum(p.numel() for p in stg_model.parameters()) if stg_model else 0,
@@ -216,60 +244,70 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
             if top_k is not None:
                 top_k = int(top_k)
 
-            if category not in self.classes:
-                category = self.classes[0] if self.classes else "bicycle"
+            gru_model, gru_ckpt, gru_classes = self.get_gru_model()
+            if gru_model is None:
+                self.send_json({"error": "DrawingGRU model checkpoint not found on server"}, status=HTTPStatus.NOT_FOUND)
+                return
 
-            class_id = self.classes.index(category)
-            max_len = self.ckpt.get("config", {}).get("max_len", 160)
+            classes = gru_classes or self.classes or ["bed", "bicycle", "car", "chair", "house", "table"]
+            if category not in classes:
+                category = classes[0] if classes else "bicycle"
 
-            # Autoregressive generation (with user prefix if provided)
-            if prefix and isinstance(prefix, list) and len(prefix) > 0:
-                res = generate_with_prefix(
-                    model=self.model,
-                    class_id=class_id,
-                    prefix_actions=prefix,
-                    seed=seed,
-                    max_len=max_len,
-                    temperature=temperature,
-                    top_k=top_k,
-                    continuous_coords=continuous,
-                )
-            else:
-                res = generate(
-                    model=self.model,
-                    class_id=class_id,
-                    seed=seed,
-                    max_len=max_len,
-                    temperature=temperature,
-                    top_k=top_k,
-                    continuous_coords=continuous,
-                )
+            class_id = classes.index(category)
+            max_len = gru_ckpt.get("config", {}).get("max_len", 160) if gru_ckpt else 160
 
-            actions = res["actions"]
-            svg_smooth = render_svg(actions, width=256, height=256, smooth=True)
-            svg_raw = render_svg(actions, width=256, height=256, smooth=False)
-            bezier_strokes = actions_to_bezier_segments(actions, width=512, height=512)
+            try:
+                # Autoregressive generation (with user prefix if provided)
+                if prefix and isinstance(prefix, list) and len(prefix) > 0:
+                    res = generate_with_prefix(
+                        model=gru_model,
+                        class_id=class_id,
+                        prefix_actions=prefix,
+                        seed=seed,
+                        max_len=max_len,
+                        temperature=temperature,
+                        top_k=top_k,
+                        continuous_coords=continuous,
+                    )
+                else:
+                    res = generate(
+                        model=gru_model,
+                        class_id=class_id,
+                        seed=seed,
+                        max_len=max_len,
+                        temperature=temperature,
+                        top_k=top_k,
+                        continuous_coords=continuous,
+                    )
 
-            response_data = {
-                "category": category,
-                "class_id": class_id,
-                "seed": seed,
-                "temperature": temperature,
-                "top_k": top_k,
-                "smooth": smooth,
-                "continuous": continuous,
-                "user_stroke_count": res.get("user_stroke_count", 0),
-                "n_tokens": res.get("n_tokens", len(actions)),
-                "natural_end": res.get("natural_end", True),
-                "repaired": res.get("repaired", False),
-                "actions": actions,
-                "bezier_strokes": bezier_strokes,
-                "svg_smooth": svg_smooth,
-                "svg_raw": svg_raw,
-                "svg": svg_smooth if smooth else svg_raw,
-            }
-            self.send_json(response_data)
-            return
+                actions = res["actions"]
+                svg_smooth = render_svg(actions, width=256, height=256, smooth=True)
+                svg_raw = render_svg(actions, width=256, height=256, smooth=False)
+                bezier_strokes = actions_to_bezier_segments(actions, width=512, height=512)
+
+                response_data = {
+                    "category": category,
+                    "class_id": class_id,
+                    "seed": seed,
+                    "temperature": temperature,
+                    "top_k": top_k,
+                    "smooth": smooth,
+                    "continuous": continuous,
+                    "user_stroke_count": res.get("user_stroke_count", 0),
+                    "n_tokens": res.get("n_tokens", len(actions)),
+                    "natural_end": res.get("natural_end", True),
+                    "repaired": res.get("repaired", False),
+                    "actions": actions,
+                    "bezier_strokes": bezier_strokes,
+                    "svg_smooth": svg_smooth,
+                    "svg_raw": svg_raw,
+                    "svg": svg_smooth if smooth else svg_raw,
+                }
+                self.send_json(response_data)
+                return
+            except Exception as e:
+                self.send_json({"error": f"Generation error: {e}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
 
         if path == "/api/generate_text":
             content_length = int(self.headers.get("Content-Length", 0))
@@ -555,12 +593,16 @@ def run_server(host: str = "127.0.0.1", port: int = 8080, checkpoint_path: str =
     ckpt_path = Path(checkpoint_path)
     if not ckpt_path.exists():
         # Fallback to outputs_qd or outputs
-        if Path("outputs_v2/laptop/checkpoints/best.pt").exists():
-            ckpt_path = Path("outputs_v2/laptop/checkpoints/best.pt")
-        elif Path("outputs_qd_h384/checkpoints/best.pt").exists():
-            ckpt_path = Path("outputs_qd_h384/checkpoints/best.pt")
-        elif Path("outputs_qd/checkpoints/best.pt").exists():
-            ckpt_path = Path("outputs_qd/checkpoints/best.pt")
+        for cand in [
+            PROJECT_ROOT / "outputs_qd" / "checkpoints" / "best.pt",
+            PROJECT_ROOT / "outputs" / "checkpoints" / "best.pt",
+            PROJECT_ROOT / "outputs_qd_h384" / "checkpoints" / "best.pt",
+            PROJECT_ROOT / "outputs_v2" / "scaled" / "full" / "checkpoint_best.pt",
+            PROJECT_ROOT / "outputs_v2" / "laptop" / "checkpoints" / "best.pt",
+        ]:
+            if cand.exists():
+                ckpt_path = cand
+                break
 
     print(f"Loading checkpoint from {ckpt_path}...")
     ckpt_raw = torch.load(str(ckpt_path), map_location="cpu")
@@ -572,9 +614,29 @@ def run_server(host: str = "127.0.0.1", port: int = 8080, checkpoint_path: str =
         ckpt = ckpt_raw
         classes = ckpt.get("classes", ["bed", "bicycle", "car", "chair", "house", "table"])
     else:
+        # Checkpoint is v2 or general. Find and load v1 GRU model for /api/generate fallback.
         model = None
-        ckpt = ckpt_raw
+        ckpt = None
         classes = ["bed", "bicycle", "car", "chair", "house", "table"]
+        for cand in [
+            PROJECT_ROOT / "outputs_qd" / "checkpoints" / "best.pt",
+            PROJECT_ROOT / "outputs" / "checkpoints" / "best.pt",
+            PROJECT_ROOT / "outputs_qd_h384" / "checkpoints" / "best.pt",
+        ]:
+            if cand.exists():
+                try:
+                    v1_raw = torch.load(str(cand), map_location="cpu")
+                    if "model_config" in v1_raw:
+                        from .model.gru import DrawingGRU
+                        model = DrawingGRU(**v1_raw["model_config"])
+                        model.load_state_dict(v1_raw["model_state"])
+                        model.eval()
+                        ckpt = v1_raw
+                        classes = v1_raw.get("classes", ["bed", "bicycle", "car", "chair", "house", "table"])
+                        print(f"Loaded v1 DrawingGRU from {cand}")
+                        break
+                except Exception as e:
+                    print(f"Could not load v1 fallback from {cand}: {e}")
 
     DrawingStudioHandler.model = model
     DrawingStudioHandler.ckpt = ckpt

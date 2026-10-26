@@ -121,13 +121,18 @@ if (chkContinuous) {
 // Clear Canvas
 btnClear.addEventListener('click', () => {
     stopAnimation();
-    if (isSketchMode) exitSketchMode();
     resetCanvas();
+    userPrefixActions = [];
+    userStrokeCount = 0;
+    lastDrawPt = null;
+    currentStylusStroke = null;
+    if (btnComplete) btnComplete.style.display = 'none';
     currentActions = [];
     currentPaths = [];
     currentIndex = 0;
     updateProgressUI();
-    tokenFeed.innerHTML = '<div style="color:var(--text-dim); text-align:center; padding: 24px 0;">Canvas cleared</div>';
+    penStateLabel.textContent = 'STATUS: IDLE (READY TO DRAW)';
+    tokenFeed.innerHTML = '<div style="color:var(--text-dim); text-align:center; padding: 24px 0;">Canvas cleared — draw directly with mouse/pen or click a category</div>';
 });
 
 function resetCanvas() {
@@ -142,78 +147,35 @@ function resetCanvas() {
     currentPaths = [];
 }
 
-// Collaborative Sketch Mode State
-let isSketchMode = false;
+// Hardware Stylus Pointer HUD & Recording Elements
+const stylusHud = document.getElementById('stylusHud');
+const stylusPointerType = document.getElementById('stylusPointerType');
+const stylusPressureBar = document.getElementById('stylusPressureBar');
+const stylusPressureText = document.getElementById('stylusPressureText');
+const stylusTiltText = document.getElementById('stylusTiltText');
+
+function updateStylusHud(e) {
+    if (!stylusHud) return;
+    const type = e.pointerType || 'mouse';
+    if (stylusPointerType) stylusPointerType.textContent = type.toUpperCase();
+    const p = (typeof e.pressure === 'number' && e.pressure > 0) ? e.pressure : (isDrawingStroke ? 0.7 : 0);
+    if (stylusPressureBar) stylusPressureBar.style.width = `${Math.round(p * 100)}%`;
+    if (stylusPressureText) stylusPressureText.textContent = p.toFixed(2);
+    if (stylusTiltText) stylusTiltText.textContent = `X: ${e.tiltX || 0}° Y: ${e.tiltY || 0}°`;
+}
+
+// Collaborative Sketch & Interactive Stylus State
 let isDrawingStroke = false;
 let userPrefixActions = [];
 let userStrokeCount = 0;
 let lastDrawPt = null;
-
-function enterSketchMode() {
-    stopAnimation();
-    resetCanvas();
-    isSketchMode = true;
-    isDrawingStroke = false;
-    userPrefixActions = [];
-    userStrokeCount = 0;
-    lastDrawPt = null;
-
-    btnSketch.textContent = '❌ Cancel Sketch';
-    btnComplete.style.display = 'inline-flex';
-    btnPlayPause.disabled = true;
-    btnStep.disabled = true;
-    canvas.style.cursor = 'crosshair';
-
-    penStateLabel.textContent = 'SKETCH MODE: Draw 1-2 initial strokes with your mouse on the canvas';
-    tokenFeed.innerHTML = '<div style="color:var(--text-muted); text-align:center; padding: 20px 0;">Draw on the canvas. When ready, click "✨ Complete"</div>';
-}
-
-function exitSketchMode() {
-    isSketchMode = false;
-    isDrawingStroke = false;
-    canvas.style.cursor = 'default';
-    btnSketch.textContent = '✏️ Sketch Prefix';
-    btnComplete.style.display = 'none';
-    btnPlayPause.disabled = false;
-    btnStep.disabled = false;
-}
-
-if (btnSketch) {
-    btnSketch.addEventListener('click', () => {
-        if (!isSketchMode) {
-            enterSketchMode();
-        } else {
-            exitSketchMode();
-            penStateLabel.textContent = 'STATUS: IDLE';
-        }
-    });
-}
-
-if (btnComplete) {
-    btnComplete.addEventListener('click', () => {
-        if (!userPrefixActions.length) {
-            alert('Please draw at least one stroke before completing!');
-            return;
-        }
-        // Ensure last stroke has PEN_UP if user finished drawing
-        if (userPrefixActions[userPrefixActions.length - 1].type !== 'PEN_UP') {
-            userPrefixActions.push({ type: 'PEN_UP' });
-        }
-        const prefixToPass = [...userPrefixActions];
-        exitSketchMode();
-        const promptInput = document.getElementById('textPromptInput');
-        if (promptInput && promptInput.value.trim().length > 0) {
-            startNewDrawingFromPrompt(promptInput.value.trim(), prefixToPass);
-        } else {
-            startNewDrawing(prefixToPass);
-        }
-    });
-}
+let currentStylusStroke = null;
+let recordedStylusStrokes = [];
 
 function getCanvasPoint(e) {
     const { w, h, rect } = getCanvasSize();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
     const x = Math.max(0, Math.min(w, clientX - rect.left));
     const y = Math.max(0, Math.min(h, clientY - rect.top));
     return {
@@ -224,50 +186,141 @@ function getCanvasPoint(e) {
     };
 }
 
-canvas.addEventListener('mousedown', (e) => {
-    if (!isSketchMode) return;
+function handlePointerDown(e) {
+    if (e.button !== undefined && e.button !== 0) return;
+
+    if (isPlaying) {
+        stopAnimation();
+    }
+
+    updateStylusHud(e);
     isDrawingStroke = true;
     const pt = getCanvasPoint(e);
-    lastDrawPt = pt;
-    userPrefixActions.push({ type: 'MOVE', x: pt.normX, y: pt.normY });
+    const p = (typeof e.pressure === 'number' && e.pressure > 0) ? e.pressure : 0.7;
+    const tilt = Math.round(Math.sqrt((e.tiltX || 0) ** 2 + (e.tiltY || 0) ** 2));
 
-    ctx.strokeStyle = '#6366f1';
-    ctx.lineWidth = 4;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.arc(pt.px, pt.py, 2, 0, Math.PI * 2);
+    lastDrawPt = { px: pt.px, py: pt.py, p };
+    userPrefixActions.push({ type: 'MOVE', x: pt.normX, y: pt.normY });
+    currentStylusStroke = [{ x: pt.normX, y: pt.normY, pressure: p, tilt }];
+
+    const dotRadius = Math.max(1.5, Math.min(6.0, 1.5 + p * 3.0));
     ctx.fillStyle = '#6366f1';
+    ctx.beginPath();
+    ctx.arc(pt.px, pt.py, dotRadius, 0, Math.PI * 2);
     ctx.fill();
 
     appendTokenItem({ type: 'MOVE', x: pt.normX, y: pt.normY }, userPrefixActions.length - 1);
-});
+    if (btnComplete) btnComplete.style.display = 'inline-flex';
+    penStateLabel.textContent = `✏️ DRAWING: Stroke in progress (pressure: ${p.toFixed(2)})`;
 
-canvas.addEventListener('mousemove', (e) => {
-    if (!isSketchMode || !isDrawingStroke || !lastDrawPt) return;
+    try {
+        canvas.setPointerCapture(e.pointerId);
+    } catch (_) {}
+}
+
+function handlePointerMove(e) {
+    updateStylusHud(e);
+    if (!isDrawingStroke || !lastDrawPt) return;
+
     const pt = getCanvasPoint(e);
     const dist = Math.hypot(pt.px - lastDrawPt.px, pt.py - lastDrawPt.py);
-    if (dist < 4) return; // avoid noisy identical points
+    if (dist < 2.5) return;
 
-    userPrefixActions.push({ type: 'LINE', x: pt.normX, y: pt.normY });
+    const p = (typeof e.pressure === 'number' && e.pressure > 0) ? e.pressure : 0.7;
+    const tilt = Math.round(Math.sqrt((e.tiltX || 0) ** 2 + (e.tiltY || 0) ** 2));
+    const strokeWidth = Math.max(2.0, Math.min(8.0, 1.5 + p * 4.5));
 
+    ctx.strokeStyle = '#6366f1';
+    ctx.lineWidth = strokeWidth;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.beginPath();
     ctx.moveTo(lastDrawPt.px, lastDrawPt.py);
     ctx.lineTo(pt.px, pt.py);
     ctx.stroke();
 
-    appendTokenItem({ type: 'LINE', x: pt.normX, y: pt.normY }, userPrefixActions.length - 1);
-    lastDrawPt = pt;
-});
+    userPrefixActions.push({ type: 'LINE', x: pt.normX, y: pt.normY });
+    if (currentStylusStroke) {
+        currentStylusStroke.push({ x: pt.normX, y: pt.normY, pressure: p, tilt });
+    }
+    lastDrawPt = { px: pt.px, py: pt.py, p };
 
-window.addEventListener('mouseup', () => {
-    if (!isSketchMode || !isDrawingStroke) return;
+    appendTokenItem({ type: 'LINE', x: pt.normX, y: pt.normY }, userPrefixActions.length - 1);
+}
+
+async function handlePointerUp(e) {
+    updateStylusHud(e);
+    if (!isDrawingStroke) return;
+
     isDrawingStroke = false;
+    lastDrawPt = null;
+
     userPrefixActions.push({ type: 'PEN_UP' });
     userStrokeCount++;
     appendTokenItem({ type: 'PEN_UP' }, userPrefixActions.length - 1);
-    penStateLabel.textContent = `SKETCH MODE: ${userStrokeCount} stroke(s) drawn. Click "✨ Complete" or add another stroke!`;
-});
+
+    penStateLabel.textContent = `✏️ ${userStrokeCount} stroke(s) drawn. Click "✨ Complete" to let AI finish, or keep drawing!`;
+    if (btnComplete) btnComplete.style.display = 'inline-flex';
+
+    if (currentStylusStroke && currentStylusStroke.length >= 2) {
+        recordedStylusStrokes.push(currentStylusStroke);
+        try {
+            await fetch('/api/record_stylus_stroke', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    points: currentStylusStroke,
+                    brush: 'pencil',
+                    base_width: 2.5,
+                    stage: 'sketch',
+                })
+            });
+        } catch (err) {
+            console.warn('Could not sync stylus stroke', err);
+        }
+    }
+    currentStylusStroke = null;
+
+    try {
+        canvas.releasePointerCapture(e.pointerId);
+    } catch (_) {}
+}
+
+canvas.addEventListener('pointerdown', handlePointerDown);
+canvas.addEventListener('pointermove', handlePointerMove);
+canvas.addEventListener('pointerup', handlePointerUp);
+canvas.addEventListener('pointercancel', handlePointerUp);
+
+if (btnSketch) {
+    btnSketch.addEventListener('click', () => {
+        stopAnimation();
+        resetCanvas();
+        userPrefixActions = [];
+        userStrokeCount = 0;
+        lastDrawPt = null;
+        currentStylusStroke = null;
+        penStateLabel.textContent = 'SKETCH MODE: Draw on the canvas with your mouse/stylus, then click "✨ Complete"';
+        tokenFeed.innerHTML = '<div style="color:var(--text-muted); text-align:center; padding: 20px 0;">Draw on the canvas. When ready, click "✨ Complete"</div>';
+        if (btnComplete) btnComplete.style.display = 'inline-flex';
+    });
+}
+
+if (btnComplete) {
+    btnComplete.addEventListener('click', () => {
+        if (!userPrefixActions.length) {
+            alert('Please draw at least one stroke before completing!');
+            return;
+        }
+        if (userPrefixActions[userPrefixActions.length - 1].type !== 'PEN_UP') {
+            userPrefixActions.push({ type: 'PEN_UP' });
+        }
+        const prefixToPass = [...userPrefixActions];
+        userPrefixActions = [];
+        userStrokeCount = 0;
+        if (btnComplete) btnComplete.style.display = 'none';
+        startNewDrawing(prefixToPass);
+    });
+}
 
 // Fetch new drawing from model API
 async function startNewDrawing(prefixActions = null) {
@@ -835,75 +888,7 @@ if (tabBtnStudio && tabBtnAB) {
     });
 }
 
-// Hardware Stylus Pointer HUD & Recording
-const stylusHud = document.getElementById('stylusHud');
-const stylusPointerType = document.getElementById('stylusPointerType');
-const stylusPressureBar = document.getElementById('stylusPressureBar');
-const stylusPressureText = document.getElementById('stylusPressureText');
-const stylusTiltText = document.getElementById('stylusTiltText');
 
-let recordedStylusStrokes = [];
-let currentStylusStroke = null;
-
-canvas.addEventListener('pointerdown', (e) => {
-    updateStylusHud(e);
-    const { w, h, rect } = getCanvasSize();
-    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / w));
-    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / h));
-    const p = typeof e.pressure === 'number' && e.pressure > 0 ? e.pressure : 0.8;
-    const tilt = Math.round(Math.sqrt((e.tiltX || 0) ** 2 + (e.tiltY || 0) ** 2));
-
-    currentStylusStroke = [{ x, y, pressure: p, tilt }];
-});
-
-canvas.addEventListener('pointermove', (e) => {
-    updateStylusHud(e);
-    if (!currentStylusStroke) return;
-    const { w, h, rect } = getCanvasSize();
-    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / w));
-    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / h));
-    const p = typeof e.pressure === 'number' && e.pressure > 0 ? e.pressure : 0.8;
-    const tilt = Math.round(Math.sqrt((e.tiltX || 0) ** 2 + (e.tiltY || 0) ** 2));
-    currentStylusStroke.push({ x, y, pressure: p, tilt });
-});
-
-canvas.addEventListener('pointerup', async (e) => {
-    updateStylusHud(e);
-    if (currentStylusStroke && currentStylusStroke.length >= 2) {
-        recordedStylusStrokes.push(currentStylusStroke);
-        // Sync recorded stroke to backend
-        try {
-            await fetch('/api/record_stylus_stroke', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    points: currentStylusStroke,
-                    brush: 'pencil',
-                    base_width: 2.5,
-                    stage: 'sketch',
-                })
-            });
-        } catch (err) {
-            console.warn('Could not record stylus stroke', err);
-        }
-    }
-    currentStylusStroke = null;
-});
-
-canvas.addEventListener('pointercancel', (e) => {
-    updateStylusHud(e);
-    currentStylusStroke = null;
-});
-
-function updateStylusHud(e) {
-    if (!stylusHud) return;
-    const type = e.pointerType || 'mouse';
-    stylusPointerType.textContent = type.toUpperCase();
-    const p = typeof e.pressure === 'number' ? e.pressure : 0;
-    stylusPressureBar.style.width = `${Math.round(p * 100)}%`;
-    stylusPressureText.textContent = p.toFixed(2);
-    stylusTiltText.textContent = `X: ${e.tiltX || 0}° Y: ${e.tiltY || 0}°`;
-}
 
 // Staged Generation & Scrubber
 let currentStagedData = null;

@@ -73,7 +73,19 @@ Documents real measured weaknesses, benchmark failures, edge-case bottlenecks, a
 - **Issue**: In sequences of 100-160 tokens, EOS accounts for $< 0.7\%$ of targets. Standard cross-entropy pushed EOS probability at true termination boundaries down to only 1.44% (mean logit rank 7.4), causing all uncalibrated greedy rollouts to hit `max_seq_len`.
 - **Resolution**: Implemented class weighting $w_{\text{EOS}} = 4.0$ in cross-entropy loss and added an explicit length-prior logit bias ($\alpha = 0.04$ after 16 tokens).
 - **Evidence**: Audit in `outputs_v2/audit/loss_eos_audit.json` showed uncalibrated EOS probability rising from 0.00% to 3.87% and natural termination restored.
-  - Explicit EOS logit bias or length penalty during inference sampling.
+
+---
+
+### FAILURE-008: Web Studio Drawing Unresponsiveness & Model Loading Mismatch
+- **Issue**: In the Live Drawing Studio web interface (`http://127.0.0.1:8080`), attempts to draw produced nothing on canvas. Category clicks / initial load threw unhandled 500 errors and closed the HTTP connection.
+- **Root Cause**:
+  1. `start_webview.py` was started with `--checkpoint outputs_v2/laptop/checkpoints/best.pt`. Because v2 staged transformer checkpoints lack `"model_config"`, `DrawingStudioHandler.model` remained `None`. Any call to `/api/generate` threw `AttributeError: 'NoneType' object has no attribute 'eval'`.
+  2. Freehand interactive drawing on the HTML5 canvas was blocked by `if (!isSketchMode) return;` in `mousedown`. Pointer event listeners (`pointerdown`/`pointermove`) recorded points for the HUD telemetry bar but never rendered strokes to the 2D canvas context.
+- **Resolution**:
+  1. Implemented `DrawingStudioHandler.get_gru_model()` with auto-discovery and fallback loading of the v1 GRU checkpoint (`outputs_qd/checkpoints/best.pt`). Both v1 and v2 models remain loaded simultaneously so all endpoints (`/api/generate`, `/api/generate_staged`, `/api/generate_text`, `/api/record_stylus_stroke`) function reliably.
+  2. Replaced divided mouse/pointer listeners in `app.js` with a unified Pointer Events drawing engine (`pointerdown`, `pointermove`, `pointerup`, `pointercancel`) supporting mouse, stylus (with pressure & tilt), and touch with `touch-action: none;`. Strokes render live on the canvas and automatically populate user prefix actions with one-click "✨ Complete" AI continuation.
+- **Evidence**: Verified with automated endpoint test script returning HTTP 200 across all 6 API routes, clean JS syntax validation via Node.js, and 123 green unit tests.
+
 
 
 

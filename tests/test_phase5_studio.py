@@ -67,3 +67,24 @@ def test_staged_transformer_inference_pipeline():
         assert len(res["stage_history"]) == 2
         assert "doc" in res
         assert len(res["doc"].commands) >= 0
+
+
+def test_gru_model_lazy_loading_and_generation():
+    """Verify DrawingStudioHandler lazily loads the v1 GRU model and supports generation."""
+    gru_model, gru_ckpt, gru_classes = DrawingStudioHandler.get_gru_model()
+    assert gru_model is not None
+    assert "bicycle" in gru_classes
+    assert hasattr(gru_model, "eval")
+
+    from konnon_draw.sampling import generate, generate_with_prefix
+    # Test unconditioned generation
+    res = generate(gru_model, class_id=0, seed=42, max_len=30)
+    assert "actions" in res
+    assert len(res["actions"]) > 0
+
+    # Test user prefix completion
+    prefix = [{"type": "MOVE", "x": 0.2, "y": 0.3}, {"type": "LINE", "x": 0.5, "y": 0.6}, {"type": "PEN_UP"}]
+    res_pref = generate_with_prefix(gru_model, class_id=0, prefix_actions=prefix, seed=42, max_len=30)
+    assert "actions" in res_pref
+    assert len(res_pref["actions"]) >= 3
+

@@ -77,3 +77,13 @@ Documents all technical decisions, architecture choices, and trade-offs.
 - **Decision**: Added class weight $w_{\text{EOS}} = 4.0$ to cross-entropy loss during training and calibrated a soft linear length-prior bias ($\alpha = 0.04$ after minimum 16 tokens) during autoregressive sampling.
 - **Why**: Restores natural stage completion without relying on arbitrary hard sequence cutoffs.
 
+---
+
+### DECISION-011: Unified Pointer Events Engine & Multi-Model Concurrent Serving in Web Studio
+- **Context**: In the Live Drawing Studio (`http://127.0.0.1:8080`), user drawing was unresponsive when directly interacting with the canvas, and AI generation failed with `AttributeError` whenever a v2 checkpoint was supplied to `start_webview.py`.
+- **Decision**:
+  1. Consolidated web client drawing handlers into a single Pointer Events engine (`pointerdown`, `pointermove`, `pointerup`, `pointercancel`) supporting mouse, stylus (with real pressure & tilt), and touch with `touch-action: none;`. Strokes immediately render to canvas, populate user prefix actions, and expose the "✨ Complete" action.
+  2. Enhanced `DrawingStudioHandler` to concurrently load and serve both the v1 DrawingGRU checkpoint (`outputs_qd/checkpoints/best.pt`) for `/api/generate` and the v2 Staged Transformer (`outputs_v2/laptop/checkpoints/best.pt` or `outputs_v2/scaled/full/checkpoint_best.pt`) for `/api/generate_staged` and `/api/compare_ab`.
+- **Why**: Eliminates dual-listener event competition, allows immediate freehand sketching at any time, and ensures all webview endpoints operate concurrently without crashing.
+
+
