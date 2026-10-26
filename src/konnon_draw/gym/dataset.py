@@ -45,7 +45,16 @@ class StagedDrawingDataset(Dataset):
         stage_idx = int(item["stage_idx"])
 
         # Canvas tensor: shape (3, H, W) normalized [0, 1]
-        canvas_arr = item["canvas_arr"]  # np.ndarray uint8 (H, W, 3)
+        if "canvas_arr" in item and item["canvas_arr"] is not None:
+            canvas_arr = item["canvas_arr"]  # np.ndarray uint8 (H, W, 3)
+        elif "canvas_path" in item:
+            canvas_img = Image.open(item["canvas_path"]).convert("RGB")
+            if canvas_img.size != (self.canvas_res, self.canvas_res):
+                canvas_img = canvas_img.resize((self.canvas_res, self.canvas_res), Image.Resampling.BILINEAR)
+            canvas_arr = np.array(canvas_img, dtype=np.uint8)
+        else:
+            canvas_arr = np.ones((self.canvas_res, self.canvas_res, 3), dtype=np.uint8) * 255
+
         canvas_t = torch.from_numpy(canvas_arr).permute(2, 0, 1).float() / 255.0
 
         # Token sequence for this stage's new strokes

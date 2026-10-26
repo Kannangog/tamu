@@ -1,11 +1,11 @@
 {
   "dataset_name": "Konnon Draw Staged Gym",
   "version": "1.0",
-  "date_created": "2026-10-26 18:10:52",
+  "date_created": "2026-10-26 19:43:27",
   "license": "CC0 1.0 Universal (Self-Generated Synthetic)",
   "source": "src/konnon_draw/gym/stage_generator.py",
-  "num_base_drawings": 4,
-  "num_stage_transitions": 14,
+  "num_base_drawings": 20,
+  "num_stage_transitions": 60,
   "canvas_resolution": [
     64,
     64

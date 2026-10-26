@@ -4,67 +4,64 @@ This document provides exact, reproducible steps for training the **Konnon Draw 
 
 ---
 
-## 1. Cloud Provider Comparison & Cost Estimates
+## 1. Cloud Provider Comparison & Cost Estimates (Market Estimates)
 
-| Provider | Recommended GPU | VRAM | Hourly Cost | Training Config | Expected Wall Time (50 Epochs) | Total Cost Estimate |
+*Note: Prices below reflect prevailing on-demand / spot market rates across cloud providers and are estimates subject to dynamic capacity fluctuations.*
+
+| Provider | Recommended GPU | VRAM | Hourly Cost (Est.) | Training Config | Expected Wall Time (30 Epochs) | Total Cost Estimate |
 |---|---|---|---|---|---|---|
-| **RunPod** (Secure Cloud) | 1× RTX 4090 | 24 GB | \$0.74 / hr | `configs/general_full_gpu.yaml` ($d=512$, 8 layers, 45M params) | ~6.5 hours | **\$4.80** |
-| **RunPod** / **Lambda** | 1× A100 SXM | 80 GB | \$1.89 / hr | `configs/general_full_gpu.yaml` ($d=768$, 16 layers, 125M params) | ~14 hours | **\$26.46** |
-| **Vast.ai** (Community) | 1× RTX 4090 | 24 GB | \$0.42 / hr | `configs/general_full_gpu.yaml` (Spot / interruptible) | ~7.0 hours | **\$2.94** |
-| **Lambda Labs** | 1× H100 PCIe | 80 GB | \$2.49 / hr | Frontier ($d=1024$, 24 layers, 350M params) | ~18 hours | **\$44.82** |
+| **RunPod** (Community Cloud) | 1× RTX 4090 | 24 GB | \$0.69 – \$0.74 / hr | Staged Transformer ($d=512$, 8 layers, 45M params) | ~4.5 hours | **\$3.10 – \$3.35** |
+| **RunPod** (Secure Cloud) | 1× A100 SXM4 | 80 GB | \$1.89 – \$1.99 / hr | Full Staged ($d=768$, 12 layers, 125M params) | ~8.0 hours | **\$15.10 – \$15.90** |
+| **Lambda Labs** (On-Demand) | 1× A100 SXM4 | 80 GB | \$1.89 / hr | Full Staged ($d=768$, 12 layers, 125M params) | ~8.0 hours | **\$15.12** |
+| **Lambda Labs** (On-Demand) | 1× H100 PCIe | 80 GB | \$2.49 / hr | Frontier Staged ($d=1024$, 16 layers, 250M params) | ~5.5 hours | **\$13.70** |
+| **Vast.ai** (Interruptible/Spot) | 1× RTX 4090 | 24 GB | \$0.35 – \$0.45 / hr | Staged Transformer ($d=512$, 8 layers) | ~5.0 hours | **\$1.75 – \$2.25** |
+| **Vast.ai** (On-Demand) | 1× A100 PCIe | 80 GB | \$1.20 – \$1.45 / hr | Full Staged ($d=768$, 12 layers) | ~9.0 hours | **\$10.80 – \$13.05** |
 
-> **Recommendation**: For the 125M parameter model on 100k dataset samples, rent a single **A100 80GB on RunPod or Lambda Labs** for ~\$25 total cost.
+> **Recommendation**: For training the full 125M parameter staged multimodal model on 100k transitions, rent **1× A100 SXM 80GB on Lambda Labs or RunPod** for ~$15–$16 total cost.
 
 ---
 
-## 2. Step-by-Step Deployment Instructions
+## 2. Step-by-Step Deployment & Launch Instructions
 
 ### Step 1: Launch Instance
 Select an instance with:
 - OS: Ubuntu 22.04 LTS
 - CUDA: 12.1 or 12.2
 - Disk: at least 50 GB NVMe storage
-- PyTorch pre-installed (e.g., RunPod PyTorch 2.2 template)
+- PyTorch pre-installed (e.g., RunPod PyTorch 2.2 template or Lambda Stack)
 
-### Step 2: Clone and Setup Environment
-SSH into the instance and run:
+### Step 2: One-Click Execution via Launch Script
+A turnkey launch script is provided at `scripts/launch_gpu_train.sh`:
 
 ```bash
 # Clone repository
 git clone https://github.com/your-org/konnon-drawing-model.git
 cd konnon-drawing-model
 
-# Install uv package manager (fast, lightweight)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.cargo/env
+# Make launch script executable and run
+chmod +x scripts/launch_gpu_train.sh
+./scripts/launch_gpu_train.sh
+```
 
+### Step 3: Manual Execution Commands (Alternative)
+```bash
 # Create virtualenv and install dependencies with GPU PyTorch
 uv venv .venv --python 3.11
 source .venv/bin/activate
-
 uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-uv pip install pyyaml pillow numpy transformers tokenizers psutil
-```
+uv pip install -e .
+uv pip install pyyaml pillow numpy transformers tokenizers psutil accelerate
 
-### Step 3: Verify GPU Availability
-```bash
-python -c "import torch; print('CUDA Available:', torch.cuda.is_available(), '| Device:', torch.cuda.get_device_name(0))"
-```
-
-### Step 4: Launch Training
-Execute the full GPU training config with mixed precision and gradient accumulation:
-
-```bash
 # Single GPU training (A100 / RTX 4090)
-python -m konnon_draw.general.train_transformer --config configs/general_full_gpu.yaml
+python scripts/train_scaled_gym.py --ablation full --epochs 30 --batch_size 64 --lr 1.0e-3
 
 # Multi-GPU Distributed Data Parallel (4x A100 nodes)
-torchrun --nproc_per_node=4 -m konnon_draw.general.train_transformer --config configs/general_full_gpu.yaml
+torchrun --nproc_per_node=4 scripts/train_scaled_gym.py --ablation full --epochs 30 --batch_size 256 --lr 1.0e-3
 ```
 
-### Step 5: Resume Training from Checkpoint (if interrupted)
+### Step 4: Resume Training from Checkpoint (if interrupted)
 ```bash
-python -m konnon_draw.general.train_transformer --config configs/general_full_gpu.yaml --resume
+python scripts/train_scaled_gym.py --ablation full --epochs 30 --batch_size 64
 ```
 
 ---

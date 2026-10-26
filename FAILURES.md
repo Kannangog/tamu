@@ -58,6 +58,21 @@ Documents real measured weaknesses, benchmark failures, edge-case bottlenecks, a
   - High-frequency details remain noisy/scribbled at this training scale ($4.6\text{M}$ params, 5 epochs, CPU synthetic gym).
 - **Resolution Path**:
   - Requires longer pretraining (100k+ transitions, e.g. using `configs/staged_v0_full_gpu.yaml` on rented GPU).
+
+---
+
+### FAILURE-006: KV-Cache Step Zero Duplicate BOS Sampling Bug
+- **Issue**: Initial greedy decoding during Step 1 overfit sanity achieved only 21.88% exact match rate despite train loss reaching 0.002.
+- **Root Cause**: In `sample_stage_tokens`, the initial forward pass on `[BOS]` at `start_pos=0` updated the KV cache but discarded logits, and the generation loop at `step=1` re-fed `[BOS]` a second time. This presented the causal decoder with an illegal `[BOS, BOS]` sequence prefix.
+- **Resolution**: Fixed `sample_stage_tokens` to start sampling directly at step 0 from initial BOS logits, feeding each emitted token strictly once into the KV cache.
+- **Evidence**: Greedy decoding exact token match rate immediately jumped from 21.88% to 100.00% (32/32 transitions bit-for-bit identical, pixel MAE 0.000000).
+
+---
+
+### FAILURE-007: EOS Class Imbalance & Suppression in Unweighted Cross-Entropy
+- **Issue**: In sequences of 100-160 tokens, EOS accounts for $< 0.7\%$ of targets. Standard cross-entropy pushed EOS probability at true termination boundaries down to only 1.44% (mean logit rank 7.4), causing all uncalibrated greedy rollouts to hit `max_seq_len`.
+- **Resolution**: Implemented class weighting $w_{\text{EOS}} = 4.0$ in cross-entropy loss and added an explicit length-prior logit bias ($\alpha = 0.04$ after 16 tokens).
+- **Evidence**: Audit in `outputs_v2/audit/loss_eos_audit.json` showed uncalibrated EOS probability rising from 0.00% to 3.87% and natural termination restored.
   - Explicit EOS logit bias or length penalty during inference sampling.
 
 

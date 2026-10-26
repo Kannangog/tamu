@@ -94,25 +94,29 @@ class FrozenBuiltinTextTower(nn.Module):
         self.tokenizer = BuiltinSemanticTokenizer()
         vocab_size = len(self.tokenizer.vocab)
 
-        self.token_embed = nn.Embedding(vocab_size, d_model)
-        self.pos_embed = nn.Embedding(max_len, d_model)
+        # Deterministic semantic initialization without perturbing external RNG state
+        rng_state = torch.get_rng_state()
+        try:
+            torch.manual_seed(42)
+            self.token_embed = nn.Embedding(vocab_size, d_model)
+            self.pos_embed = nn.Embedding(max_len, d_model)
 
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=n_heads,
-            dim_feedforward=d_model * 4,
-            dropout=0.0,
-            activation="gelu",
-            batch_first=True,
-            norm_first=True,
-        )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers, enable_nested_tensor=False)
-        self.norm = nn.LayerNorm(d_model)
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=d_model,
+                nhead=n_heads,
+                dim_feedforward=d_model * 4,
+                dropout=0.0,
+                activation="gelu",
+                batch_first=True,
+                norm_first=True,
+            )
+            self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers, enable_nested_tensor=False)
+            self.norm = nn.LayerNorm(d_model)
 
-        # Initialize deterministic semantic weights
-        torch.manual_seed(42)
-        nn.init.normal_(self.token_embed.weight, std=0.02)
-        nn.init.normal_(self.pos_embed.weight, std=0.02)
+            nn.init.normal_(self.token_embed.weight, std=0.02)
+            nn.init.normal_(self.pos_embed.weight, std=0.02)
+        finally:
+            torch.set_rng_state(rng_state)
 
         # Freeze all parameters
         for p in self.parameters():

@@ -45,8 +45,7 @@ outputs_qd_skip/eval_*/samples/
 outputs_qd/ab_test/plain/
 outputs_qd/ab_test/continuous/
 outputs_general/*/checkpoints/
-outputs_v2/*/checkpoints/
-outputs_v2/eval/
+outputs_v2/
 *.pt
 
 # IDE & OS

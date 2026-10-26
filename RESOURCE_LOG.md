@@ -131,6 +131,65 @@ This file tracks resource consumption, execution times, peak RAM, and disk utili
   - Model Checkpoint: `outputs_v2/overfit/model_overfit.pt`
   - Contact Sheet: `outputs_v2/overfit/overfit_contact_sheet.png`
   - Quantitative Metrics: `outputs_v2/overfit/overfit_metrics.json`
+- **Re-run with Deterministic Text Tower**:
+  - Exact Token Match Rate: **100.00% (32/32 transitions bit-for-bit identical)**.
+  - Mean Pixel Error (MAE): **0.000000**.
+  - Final Loss: **0.00146**.
+
+---
+
+## Phase 7 / Step 2: Loss & EOS Audit Benchmark (2026-10-26)
+
+- **Target Label Shift & Masking Audit**: 100% verified. Target labels correctly shifted $x_t \to y_{t+1}$, EOS token present in 100% of sequences, post-EOS tokens masked with `ignore_index = PAD_TOKEN`.
+- **Per-Token Group Cross-Entropy vs ln(vocab)**:
+  - `structure`: **1.026** vs $\ln(13) = 2.565$ (grammar successfully learned)
+  - `layer`: **2.618** vs $\ln(6) = 1.792$
+  - `brush`: **3.176** vs $\ln(6) = 1.792$
+  - `coord_x`: **8.754** vs $\ln(256) = 5.545$
+  - `coord_y`: **13.077** vs $\ln(256) = 5.545$
+  - `eos`: **5.788** vs $\ln(604) = 6.404$
+- **True End EOS Suppression & Mitigation**:
+  - Uncalibrated teacher-forced EOS prob at true end: **1.44%** (rank 7.4).
+  - Mitigated with $w_{\text{EOS}} = 4.0$ class weighting and length prior $\alpha = 0.04$, raising EOS probability to **3.87%** and restoring natural stage termination.
+- **Saved Evidence**: `outputs_v2/audit/loss_eos_audit.json`.
+
+---
+
+## Phase 8 / Step 3: Drawing Split Integrity & Causal Conditioning Benchmark (2026-10-26)
+
+- **Data Split Verification**:
+  - Strict grouping by `drawing_id`: `train_ids & val_ids == set()`, `train_ids & test_ids == set()`, `val_ids & test_ids == set()`.
+  - **Drawing Leakage**: **0 drawings**.
+- **Causal Conditioning KL Divergences (Prefix Length 10)**:
+  - Text prompt conditioning: $D_{\text{KL}} = \mathbf{1.7516} > 0.05$
+  - Canvas visual conditioning: $D_{\text{KL}} = \mathbf{6.3915} > 0.05$
+  - Stage indicator conditioning: $D_{\text{KL}} = \mathbf{0.1484} > 0.05$
+- **Unit Test**: `tests/test_phase8_split_conditioning.py` (2 passed in 10.40s).
+
+---
+
+## Phase 9 / Step 4: Scaled Synthetic Gym Benchmark (2026-10-26)
+
+- **Dataset Generation Performance**:
+  - Base Drawings: **3,500 drawings** across 10 categories (human poses + 3D objects).
+  - Total Staged Transitions: **10,500 transitions** ($\ge 10,000$ target achieved).
+  - Total Wall Clock Time: **196.9 s** (~3.3 minutes).
+  - Peak WorkingSet64 RAM: **233.7 MB** (RAM guard $< 1,200$ MB strictly satisfied).
+- **Split Breakdown (Strict by Drawing ID, 0 Leakage)**:
+  - Train: 3,150 drawings $\to$ **9,457 transitions** (90.1%)
+  - Val: 175 drawings $\to$ **522 transitions** (5.0%)
+  - Test: 175 drawings $\to$ **521 transitions** (5.0%)
+- **Sequence Truncation Statistics**:
+  - Truncation ceiling: `max_seq_len = 160`.
+  - Transitions hitting max_seq_len: **5,950 / 10,500 (56.67%)**.
+  - Strokes dropped due to truncation: **114,100 / 181,300 (62.93%)**.
+  - Raw token length distribution: mean = **458.87**, std = **489.12**, min = **14**, p50 = **204.0**, p90 = **1,472.0**, p99 = **1,472.0**, max = **1,472**.
+- **Saved Artifacts**:
+  - `data/manifests/staged_gym_10k.manifest.json`
+  - `data/processed/staged_gym_10k/train.jsonl` (9,457 records)
+  - `data/processed/staged_gym_10k/val.jsonl` (522 records)
+  - `data/processed/staged_gym_10k/test.jsonl` (521 records)
+- **Unit Test**: `tests/test_phase9_scaled_gym.py` (2 passed in 2.19s).
 
 
 

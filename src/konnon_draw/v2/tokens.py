@@ -30,6 +30,7 @@ from ..general.vocab import (
     TOKEN_SET_BRUSH,
     TOKEN_SET_COLOR,
     TOKEN_SET_WIDTH,
+    SPECIAL_COMMAND_OFFSET,
     NUM_COORD_BINS,
     X_OFFSET,
     Y_OFFSET,

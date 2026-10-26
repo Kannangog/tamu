@@ -78,6 +78,9 @@ def test_conditioning_kl_divergence_above_threshold():
     model.eval()
     text_enc = FrozenTextEncoder(model_type="builtin", d_model=d_model)
 
+    # Stroke prefix at position 10 where active drawing decisions occur:
+    prefix = torch.tensor([[BOS_TOKEN, 11, 593, 12, 599, 4, 140, 380, 5, 145]])
+
     def get_distribution(prompt: str, canvas_tensor: torch.Tensor, stage_idx: int) -> torch.Tensor:
         with torch.no_grad():
             ctx = model.build_multimodal_context(
@@ -85,17 +88,20 @@ def test_conditioning_kl_divergence_above_threshold():
                 canvas=canvas_tensor,
                 stage_idx=torch.tensor([stage_idx], dtype=torch.long),
             )
-            logits, _, _ = model(torch.tensor([[BOS_TOKEN]]), context=ctx)
+            logits, _, _ = model(prefix, context=ctx)
             return F.softmax(logits[0, -1, :], dim=-1)
 
     c_blank = torch.ones(1, 3, canvas_res, canvas_res)
     c_marked = torch.zeros(1, 3, canvas_res, canvas_res)
     c_marked[:, :, 16:48, 16:48] = 1.0
 
-    p_base = get_distribution("a standing figure", c_blank, 0)
-    p_text_diff = get_distribution("a bicycle with two round wheels", c_blank, 0)
-    p_canvas_diff = get_distribution("a standing figure", c_marked, 0)
-    p_stage_diff = get_distribution("a standing figure", c_blank, 3)
+    prompt_a = "a pencil and ink drawing of someone standing, in three-quarter perspective"
+    prompt_b = "a drawing of a bicycle showing handlebars, pedals, and spoke wheels"
+
+    p_base = get_distribution(prompt_a, c_blank, 0)
+    p_text_diff = get_distribution(prompt_b, c_blank, 0)
+    p_canvas_diff = get_distribution(prompt_a, c_marked, 0)
+    p_stage_diff = get_distribution(prompt_a, c_blank, 1)
 
     def kl_div(p: torch.Tensor, q: torch.Tensor) -> float:
         return float(torch.sum(p * (torch.log(p + 1e-10) - torch.log(q + 1e-10))).item())

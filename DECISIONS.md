@@ -48,3 +48,32 @@ Documents all technical decisions, architecture choices, and trade-offs.
 - **Decision**: Implemented native Pointer Events (`pointerdown`, `pointermove`, `pointerup`) on `#drawCanvas` querying `e.pressure`, `e.tiltX`, and `e.tiltY`, alongside a live HUD display and an endpoint `/api/record_stylus_stroke`.
 - **Why**: Cross-browser, zero-dependency, works with Wacom, Microsoft Surface, iPad Pencil, and standard mouse/touch fallbacks.
 
+---
+
+### DECISION-007: Storing Scaled Gym Transitions in JSONL and Streaming Images to Stay Under 150 MB RAM
+- **Context**: Scaling the synthetic gym to 10,000+ transitions with $128 \times 128 \times 3$ uint8 numpy arrays in memory would require $\sim 560$ MB of raw array buffers, risking RAM limit violation ($< 1.2$ GB RSS) on the 8 GB laptop.
+- **Decision**: Saved all intermediate stage canvases as PNGs in `data/processed/staged_gym_10k/canvases/` and stored metadata and token sequences in JSONL files (`train.jsonl`, `val.jsonl`, `test.jsonl`). `StagedDrawingDataset` lazily loads canvas images on demand.
+- **Why**: Keeps process RSS memory flat at $\sim 135$ MB during generation and under 250 MB during DataLoader batch iteration.
+- **Alternatives Considered**: In-memory numpy concatenation (exceeds RAM budget) or HDF5 / SQLite (adds dependency and concurrency overhead on Windows).
+
+---
+
+### DECISION-008: Deterministic Seeding for Builtin Semantic Text Tower
+- **Context**: In Phase 8 testing, different tests changing global PyTorch seed altered the frozen text encoder weights because `nn.TransformerEncoderLayer` was initialized before `torch.manual_seed(42)` in `FrozenBuiltinTextTower.__init__`.
+- **Decision**: Scoped `torch.manual_seed(42)` at the start of `FrozenBuiltinTextTower.__init__` and restored the caller's previous RNG state in a `finally:` block.
+- **Why**: Guarantees identical deterministic embeddings across all runs and prevents hidden state contamination of other tests.
+
+---
+
+### DECISION-009: Causal Conditioning Evaluation at Drawing Offset (Prefix Length 10)
+- **Context**: Probing conditioning KL divergence directly after `[BOS_TOKEN]` (step 0) measured near-zero KL divergence because every valid sequence in the grammar deterministically begins with `[TOKEN_SET_LAYER, LAYER_OFFSET + 4, ...]`.
+- **Decision**: Evaluated next-token distribution KL divergence after the standard layer/brush initialization prefix (length 10), where actual coordinate and stroke choices are made.
+- **Why**: Measures the model's true conditional sensitivity to text prompt, canvas state, and stage index, yielding $D_{\text{KL}} = 1.75$ (text), $6.39$ (canvas), and $0.15$ (stage).
+
+---
+
+### DECISION-010: EOS Loss Weighting ($w_{\text{EOS}} = 4.0$) and Dynamic Length Prior Bias
+- **Context**: In sequences of 100-150 tokens, EOS accounts for $< 0.7\%$ of target tokens, causing unweighted cross-entropy to under-predict EOS at true end positions (1.4% probability, rank 7-8).
+- **Decision**: Added class weight $w_{\text{EOS}} = 4.0$ to cross-entropy loss during training and calibrated a soft linear length-prior bias ($\alpha = 0.04$ after minimum 16 tokens) during autoregressive sampling.
+- **Why**: Restores natural stage completion without relying on arbitrary hard sequence cutoffs.
+

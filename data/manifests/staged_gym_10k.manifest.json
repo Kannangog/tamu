@@ -1,0 +1,68 @@
+{
+  "dataset_name": "Konnon Draw Scaled Staged Gym 10k",
+  "version": "1.0",
+  "date_created": "2026-10-26 20:04:46",
+  "license": "CC0 1.0 Universal (Self-Generated Synthetic)",
+  "source": "src/konnon_draw/gym/stage_generator.py",
+  "num_base_drawings": 3500,
+  "total_transitions": 10500,
+  "splits": {
+    "train": {
+      "drawings": 3150,
+      "transitions": 9457
+    },
+    "val": {
+      "drawings": 175,
+      "transitions": 522
+    },
+    "test": {
+      "drawings": 175,
+      "transitions": 521
+    }
+  },
+  "canvas_resolution": [
+    128,
+    128
+  ],
+  "categories": [
+    "stand",
+    "walk",
+    "run",
+    "crouch",
+    "reach",
+    "sit",
+    "box",
+    "chair",
+    "bicycle",
+    "house"
+  ],
+  "stages": [
+    "layout",
+    "guide",
+    "sketch",
+    "ink",
+    "shade",
+    "effect"
+  ],
+  "truncation_stats": {
+    "total_transitions": 10500,
+    "max_seq_len": 160,
+    "transitions_hit_max_seq_len": 5950,
+    "hit_max_seq_len_pct": 56.67,
+    "total_raw_strokes": 181300,
+    "total_dropped_strokes": 114100,
+    "dropped_strokes_pct": 62.934,
+    "mean_raw_length": 458.87,
+    "std_raw_length": 523.41,
+    "min_raw_length": 32,
+    "p50_raw_length": 204.0,
+    "p90_raw_length": 1472.0,
+    "p99_raw_length": 1472.0,
+    "max_raw_length": 1472
+  },
+  "resource_metrics": {
+    "wall_clock_seconds": 196.9,
+    "peak_ram_mb": 233.7,
+    "initial_ram_mb": 197.0
+  }
+}
