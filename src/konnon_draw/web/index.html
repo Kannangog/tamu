@@ -759,21 +759,50 @@
         <div class="header-meta">
             <div class="badge">
                 <span class="badge-dot"></span>
-                <span>PyTorch GRU • 64×64 Grid</span>
+                <span>Staged Transformer (v0) • 4.59M Params</span>
             </div>
             <div class="badge">
-                <span id="modelStatusText">Model: best.pt (390k params)</span>
+                <span id="modelStatusText">Model: outputs_v2/laptop/checkpoints/best.pt</span>
             </div>
         </div>
     </header>
 
-    <main>
+    <!-- Top View Switcher -->
+    <nav class="sub-nav" style="background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 0 28px; display: flex; gap: 16px;">
+        <button id="tabBtnStudio" class="tab-btn active" style="background: none; border: none; border-bottom: 2px solid var(--accent); color: var(--text-main); font-family: inherit; font-size: 14px; font-weight: 600; padding: 12px 6px; cursor: pointer;">🎨 Interactive Studio</button>
+        <button id="tabBtnAB" class="tab-btn" style="background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-family: inherit; font-size: 14px; font-weight: 600; padding: 12px 6px; cursor: pointer;">⚖️ A/B Staged Comparison</button>
+    </nav>
+
+    <!-- Studio View Container -->
+    <main id="studioViewContainer">
         <!-- Canvas Stage -->
         <section class="stage-card">
-            <!-- Konnon Draw General: Text Prompt Bar -->
+            <!-- Konnon Draw General & Staged Prompt Bar -->
             <div class="prompt-bar-container" style="display: flex; gap: 10px; width: 100%;">
-                <input type="text" id="textPromptInput" class="seed-input" style="flex: 1; font-size: 14px; padding: 10px 14px;" placeholder="Enter drawing prompt, e.g.: a red circle above a blue square / a simple bicycle" value="a red circle above a blue square">
-                <button class="btn btn-primary" id="btnGenerateText" style="padding: 10px 18px; font-weight: 700; white-space: nowrap;">✨ Generate from Text</button>
+                <input type="text" id="textPromptInput" class="seed-input" style="flex: 1; font-size: 14px; padding: 10px 14px;" placeholder="Enter drawing prompt, e.g.: a figure standing in relaxed pose / a wooden chair" value="a figure standing in relaxed pose">
+                <button class="btn btn-primary" id="btnGenerateStaged" style="padding: 10px 18px; font-weight: 700; white-space: nowrap; background: linear-gradient(135deg, #10b981, #06b6d4); border-color: #10b981;">🎨 Generate Staged (v0)</button>
+                <button class="btn" id="btnGenerateText" style="padding: 10px 14px; font-weight: 600; white-space: nowrap;">✨ Quickdraw Text</button>
+            </div>
+
+            <!-- Staged Drawing Scrubber Bar -->
+            <div class="stage-scrubber-card" id="stageScrubberCard" style="background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 16px; margin: 4px 0 8px 0; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--accent); letter-spacing: 0.5px;">Interactive Stage Scrubber</span>
+                    <span id="activeStagePill" class="badge" style="background: rgba(99, 102, 241, 0.2); border-color: var(--accent); color: #c7d2fe; font-size: 11px;">Stage: Complete / Final</span>
+                </div>
+                <div class="stage-pills" id="stagePills" style="display: flex; gap: 6px; flex-wrap: wrap;">
+                    <button class="btn stage-pill-btn active" data-stage="all" style="padding: 4px 10px; font-size: 11px;">All Stages</button>
+                    <button class="btn stage-pill-btn" data-stage="layout" style="padding: 4px 10px; font-size: 11px;">1. Layout</button>
+                    <button class="btn stage-pill-btn" data-stage="guide" style="padding: 4px 10px; font-size: 11px;">2. Guide</button>
+                    <button class="btn stage-pill-btn" data-stage="sketch" style="padding: 4px 10px; font-size: 11px;">3. Sketch</button>
+                    <button class="btn stage-pill-btn" data-stage="ink" style="padding: 4px 10px; font-size: 11px;">4. Ink</button>
+                    <button class="btn stage-pill-btn" data-stage="shade" style="padding: 4px 10px; font-size: 11px;">5. Shade</button>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 11px; color: var(--text-dim);">Scrub:</span>
+                    <input type="range" id="stageSlider" min="0" max="5" value="5" step="1" style="flex: 1; accent-color: var(--accent);">
+                    <span id="stageSliderLabel" style="font-family: 'JetBrains Mono'; font-size: 11px; min-width: 60px; color: var(--text-muted);">Step 5/5</span>
+                </div>
             </div>
 
             <div class="category-selector" id="categoryButtons">
@@ -790,6 +819,25 @@
                 <canvas id="drawCanvas" width="512" height="512"></canvas>
                 <div id="stylus"></div>
                 <div id="stylus-ripple"></div>
+
+                <!-- Hardware Stylus HUD -->
+                <div id="stylusHud" style="position: absolute; top: 12px; right: 12px; background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(4px); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 11px; font-family: 'JetBrains Mono'; pointer-events: none; z-index: 10; display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; justify-content: space-between; gap: 12px;">
+                        <span style="color: var(--text-muted);">Pointer:</span>
+                        <span id="stylusPointerType" style="color: var(--pen-active); font-weight: 600;">Mouse / Touch</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; gap: 12px; align-items: center;">
+                        <span style="color: var(--text-muted);">Pressure:</span>
+                        <div style="width: 48px; height: 6px; background: #334155; border-radius: 3px; overflow: hidden;">
+                            <div id="stylusPressureBar" style="width: 0%; height: 100%; background: #38bdf8; transition: width 0.05s;"></div>
+                        </div>
+                        <span id="stylusPressureText">0.00</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; gap: 12px;">
+                        <span style="color: var(--text-muted);">Tilt:</span>
+                        <span id="stylusTiltText">X: 0° Y: 0°</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Controls & Speed -->
@@ -909,6 +957,83 @@
             </div>
         </aside>
     </main>
+
+    <!-- A/B Comparison View Container -->
+    <section id="abViewContainer" style="display: none; padding: 24px 28px; max-width: 1400px; margin: 0 auto; width: 100%;">
+        <div style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 24px; display: flex; flex-direction: column; gap: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div>
+                    <h2 style="font-size: 18px; font-weight: 700; color: var(--text-main);">⚖️ Model v0: Staged Multimodal vs. Baseline Direct Pass</h2>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Compare structured staged drawing (layout → guide → ink → shade with canvas visual feedback) against single-pass unconditioned stroke generation.</p>
+                </div>
+                <div class="badge" style="background: rgba(16, 185, 129, 0.15); border-color: #10b981; color: #6ee7b7;">Gate 5 Live Benchmark</div>
+            </div>
+
+            <!-- A/B Prompt Bar & Presets -->
+            <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                <input type="text" id="abPromptInput" class="seed-input" style="flex: 1; min-width: 280px; padding: 10px 14px; font-size: 14px;" value="a figure standing in relaxed pose">
+                <button class="btn btn-primary" id="btnRunAB" style="padding: 10px 20px; font-weight: 700; white-space: nowrap; background: linear-gradient(135deg, #6366f1, #8b5cf6);">⚖️ Run A/B Benchmark</button>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                <span style="font-size: 12px; color: var(--text-dim);">Prompt Presets:</span>
+                <button class="btn ab-preset-btn" data-prompt="a figure standing in relaxed pose" style="padding: 3px 8px; font-size: 11px;">Standing Figure</button>
+                <button class="btn ab-preset-btn" data-prompt="an athletic figure sprinting with maximum momentum" style="padding: 3px 8px; font-size: 11px;">Sprinting Figure</button>
+                <button class="btn ab-preset-btn" data-prompt="a wooden chair in three-quarter perspective" style="padding: 3px 8px; font-size: 11px;">Perspective Chair</button>
+                <button class="btn ab-preset-btn" data-prompt="a commuter bicycle with dual wheels" style="padding: 3px 8px; font-size: 11px;">Bicycle</button>
+                <button class="btn ab-preset-btn" data-prompt="a geometric cube in perspective with cast shadow" style="padding: 3px 8px; font-size: 11px;">Geometric Cube</button>
+            </div>
+
+            <!-- Side-by-Side Comparison Grid -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 10px;">
+                <!-- Column A: Staged Model v0 -->
+                <div style="background: var(--bg-elevated); border: 2px solid #6366f1; border-radius: var(--radius-md); padding: 18px; display: flex; flex-direction: column; gap: 14px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 14px; font-weight: 700; color: #a5b4fc;">Model v0: Staged Conditioning (Layout → Guide → Ink → Shade)</span>
+                        <span id="abStagedBadge" class="badge" style="background: rgba(99, 102, 241, 0.2); border-color: #6366f1; color: #c7d2fe;">4 Stages • 640 Toks</span>
+                    </div>
+                    <div style="width: 100%; aspect-ratio: 1; background: #ffffff; border-radius: var(--radius-sm); overflow: hidden; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(0,0,0,0.3);">
+                        <div id="abStagedPreview" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 13px;">Click "Run A/B Benchmark" to compare</div>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-muted); background: var(--bg-input); padding: 12px; border-radius: var(--radius-sm);">
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>Active Stages:</span>
+                            <span id="abStagedStagesList" style="font-family: 'JetBrains Mono'; color: var(--text-main);">layout, guide, ink, shade</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>Multimodal Canvas Feedback:</span>
+                            <span style="color: #34d399; font-weight: 600;">ACTIVE (8×8 Conv Patch Context)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Column B: Direct Pass Baseline -->
+                <div style="background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px; display: flex; flex-direction: column; gap: 14px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 14px; font-weight: 700; color: var(--text-muted);">Baseline: Direct Pass (Single-Stage)</span>
+                        <span id="abDirectBadge" class="badge">1 Stage • 160 Toks</span>
+                    </div>
+                    <div style="width: 100%; aspect-ratio: 1; background: #ffffff; border-radius: var(--radius-sm); overflow: hidden; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(0,0,0,0.3);">
+                        <div id="abDirectPreview" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 13px;">Click "Run A/B Benchmark" to compare</div>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-muted); background: var(--bg-input); padding: 12px; border-radius: var(--radius-sm);">
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>Active Stages:</span>
+                            <span id="abDirectStagesList" style="font-family: 'JetBrains Mono'; color: var(--text-main);">ink only (single-pass)</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>Multimodal Canvas Feedback:</span>
+                            <span style="color: #94a3b8;">NONE (Unconditioned / Blank start)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Architectural Assessment Box -->
+            <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: var(--radius-md); padding: 14px 18px; font-size: 13px; line-height: 1.6; color: var(--text-muted);">
+                <strong style="color: #a5b4fc;">Architectural Finding:</strong> Staging decomposes the ill-posed one-shot sketch problem into hierarchical visual steps. Rather than guessing contour coordinates from text alone, the model grounds fine ink and shading strokes on the coarse compositional markers emitted in prior passes.
+            </div>
+        </div>
+    </section>
 
     <!-- Hand v2 Scripted Proof-of-Capability Demos -->
     <section class="hand-demos-section">

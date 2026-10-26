@@ -118,3 +118,24 @@ python -m konnon_draw.quickdraw --all-categories --per-class 2000 --out-dir data
    - Fine cross-contour shading on 3D curved surfaces.
    - Nuanced artistic style emulation (e.g. "charcoal sketch", "fine technical blueprint").
    - Near-zero syntax invalidity; consistent multi-stroke closure.
+
+---
+
+## 5. Staged Multimodal Model v0 Scaling (`configs/staged_v0_full_gpu.yaml`)
+
+To train the **Staged Multimodal Transformer** (canvas-conditioned + text-conditioned in stages):
+
+### Training Launch Command
+```bash
+python -m konnon_draw.train.train_v2 --config configs/staged_v0_full_gpu.yaml
+```
+
+### Full GPU Model Configuration
+- **Model Size**: 125,845,504 parameters
+- **Architecture**: 12 layers, 16 heads, $d_{\text{model}} = 768$, $d_{\text{ff}} = 3072$
+- **Canvas Encoder**: 4-stage Conv2D ($256 \times 256 \to 16 \times 16 = 256$ spatial patches + 1 summary token)
+- **Text Conditioning**: Frozen `all-MiniLM-L6-v2` or `openai/clip-vit-base-patch32` text tower
+- **Batch Size**: 64 (gradient accumulation steps = 2, effective batch size = 128)
+- **Training Time**: ~18 hours on 1× A100 SXM (80GB)
+- **Estimated Cloud Cost**: **~$34.00**
+

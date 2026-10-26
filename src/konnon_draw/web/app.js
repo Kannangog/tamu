@@ -800,3 +800,282 @@ setupCanvas();
 loadShowcase();
 loadHandDemos();
 startNewDrawing();
+
+// =====================================================================
+// Phase 5: Staged Scrubber, Stylus HUD & Recorder, and A/B Comparison
+// =====================================================================
+
+// Tab Switching
+const tabBtnStudio = document.getElementById('tabBtnStudio');
+const tabBtnAB = document.getElementById('tabBtnAB');
+const studioViewContainer = document.getElementById('studioViewContainer');
+const abViewContainer = document.getElementById('abViewContainer');
+
+if (tabBtnStudio && tabBtnAB) {
+    tabBtnStudio.addEventListener('click', () => {
+        tabBtnStudio.classList.add('active');
+        tabBtnStudio.style.borderBottomColor = 'var(--accent)';
+        tabBtnStudio.style.color = 'var(--text-main)';
+        tabBtnAB.classList.remove('active');
+        tabBtnAB.style.borderBottomColor = 'transparent';
+        tabBtnAB.style.color = 'var(--text-muted)';
+        if (studioViewContainer) studioViewContainer.style.display = 'grid';
+        if (abViewContainer) abViewContainer.style.display = 'none';
+    });
+
+    tabBtnAB.addEventListener('click', () => {
+        tabBtnAB.classList.add('active');
+        tabBtnAB.style.borderBottomColor = 'var(--accent)';
+        tabBtnAB.style.color = 'var(--text-main)';
+        tabBtnStudio.classList.remove('active');
+        tabBtnStudio.style.borderBottomColor = 'transparent';
+        tabBtnStudio.style.color = 'var(--text-muted)';
+        if (studioViewContainer) studioViewContainer.style.display = 'none';
+        if (abViewContainer) abViewContainer.style.display = 'block';
+    });
+}
+
+// Hardware Stylus Pointer HUD & Recording
+const stylusHud = document.getElementById('stylusHud');
+const stylusPointerType = document.getElementById('stylusPointerType');
+const stylusPressureBar = document.getElementById('stylusPressureBar');
+const stylusPressureText = document.getElementById('stylusPressureText');
+const stylusTiltText = document.getElementById('stylusTiltText');
+
+let recordedStylusStrokes = [];
+let currentStylusStroke = null;
+
+canvas.addEventListener('pointerdown', (e) => {
+    updateStylusHud(e);
+    const { w, h, rect } = getCanvasSize();
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / w));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / h));
+    const p = typeof e.pressure === 'number' && e.pressure > 0 ? e.pressure : 0.8;
+    const tilt = Math.round(Math.sqrt((e.tiltX || 0) ** 2 + (e.tiltY || 0) ** 2));
+
+    currentStylusStroke = [{ x, y, pressure: p, tilt }];
+});
+
+canvas.addEventListener('pointermove', (e) => {
+    updateStylusHud(e);
+    if (!currentStylusStroke) return;
+    const { w, h, rect } = getCanvasSize();
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / w));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / h));
+    const p = typeof e.pressure === 'number' && e.pressure > 0 ? e.pressure : 0.8;
+    const tilt = Math.round(Math.sqrt((e.tiltX || 0) ** 2 + (e.tiltY || 0) ** 2));
+    currentStylusStroke.push({ x, y, pressure: p, tilt });
+});
+
+canvas.addEventListener('pointerup', async (e) => {
+    updateStylusHud(e);
+    if (currentStylusStroke && currentStylusStroke.length >= 2) {
+        recordedStylusStrokes.push(currentStylusStroke);
+        // Sync recorded stroke to backend
+        try {
+            await fetch('/api/record_stylus_stroke', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    points: currentStylusStroke,
+                    brush: 'pencil',
+                    base_width: 2.5,
+                    stage: 'sketch',
+                })
+            });
+        } catch (err) {
+            console.warn('Could not record stylus stroke', err);
+        }
+    }
+    currentStylusStroke = null;
+});
+
+canvas.addEventListener('pointercancel', (e) => {
+    updateStylusHud(e);
+    currentStylusStroke = null;
+});
+
+function updateStylusHud(e) {
+    if (!stylusHud) return;
+    const type = e.pointerType || 'mouse';
+    stylusPointerType.textContent = type.toUpperCase();
+    const p = typeof e.pressure === 'number' ? e.pressure : 0;
+    stylusPressureBar.style.width = `${Math.round(p * 100)}%`;
+    stylusPressureText.textContent = p.toFixed(2);
+    stylusTiltText.textContent = `X: ${e.tiltX || 0}° Y: ${e.tiltY || 0}°`;
+}
+
+// Staged Generation & Scrubber
+let currentStagedData = null;
+const btnGenerateStaged = document.getElementById('btnGenerateStaged');
+const activeStagePill = document.getElementById('activeStagePill');
+const stageSlider = document.getElementById('stageSlider');
+const stageSliderLabel = document.getElementById('stageSliderLabel');
+const stagePills = document.getElementById('stagePills');
+
+if (btnGenerateStaged) {
+    btnGenerateStaged.addEventListener('click', async () => {
+        const promptInput = document.getElementById('textPromptInput');
+        const prompt = (promptInput && promptInput.value.trim()) || 'a figure standing in relaxed pose';
+        const seed = parseInt(seedInput.value, 10) || 42;
+        const temperature = parseFloat(tempSlider.value) || 0.5;
+        const top_k = parseInt(topkSlider.value, 10) || 25;
+
+        btnGenerateStaged.disabled = true;
+        btnGenerateStaged.textContent = '⏳ Drawing in stages...';
+        stopAnimation();
+
+        try {
+            const res = await fetch('/api/generate_staged', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt, seed, temperature, top_k })
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            currentStagedData = data;
+
+            // Display final stage SVG in canvas or svgCodeBox
+            lastSvgContent = data.final_svg;
+            svgCodeBox.textContent = data.final_svg;
+            btnCopySvg.disabled = false;
+            btnDownloadSvg.disabled = false;
+            btnDownloadJson.disabled = false;
+
+            // Set up scrubber
+            stageSlider.max = data.stages.length;
+            stageSlider.value = data.stages.length;
+            stageSliderLabel.textContent = `Stage ${data.stages.length}/${data.stages.length}`;
+            activeStagePill.textContent = `Stage: Complete (${data.total_tokens} tokens)`;
+
+            // Render stage image to canvas
+            renderStageToCanvas(data.final_canvas_data_url);
+
+            tokenCountBadge.textContent = `${data.total_tokens} tokens`;
+            tokenFeed.innerHTML = data.stages.map(stg => `
+                <div class="token-row">
+                    <span class="token-idx" style="color:var(--accent);">STAGE</span>
+                    <span class="token-type">${stg.stage_name.toUpperCase()}</span>
+                    <span class="token-coords" style="color:var(--text-muted);">${stg.token_count} tokens</span>
+                </div>
+            `).join('');
+        } catch (err) {
+            console.error('Staged generation error:', err);
+            alert(`Staged generation error: ${err.message}`);
+        } finally {
+            btnGenerateStaged.disabled = false;
+            btnGenerateStaged.textContent = '🎨 Generate Staged (v0)';
+        }
+    });
+}
+
+function renderStageToCanvas(dataUrl) {
+    if (!dataUrl) return;
+    const img = new Image();
+    img.onload = () => {
+        const { w, h } = getCanvasSize();
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+    };
+    img.src = dataUrl;
+}
+
+if (stageSlider) {
+    stageSlider.addEventListener('input', () => {
+        if (!currentStagedData || !currentStagedData.stages) return;
+        const val = parseInt(stageSlider.value, 10);
+        if (val === 0) {
+            // Blank
+            const { w, h } = getCanvasSize();
+            ctx.clearRect(0, 0, w, h);
+            stageSliderLabel.textContent = 'Blank (0)';
+            activeStagePill.textContent = 'Stage: Blank';
+        } else if (val <= currentStagedData.stages.length) {
+            const stg = currentStagedData.stages[val - 1];
+            renderStageToCanvas(stg.canvas_data_url);
+            stageSliderLabel.textContent = `Stage ${val}/${currentStagedData.stages.length}`;
+            activeStagePill.textContent = `Stage: ${stg.stage_name} (${stg.token_count} toks)`;
+            svgCodeBox.textContent = stg.svg;
+            lastSvgContent = stg.svg;
+        }
+    });
+}
+
+if (stagePills) {
+    stagePills.addEventListener('click', (e) => {
+        const btn = e.target.closest('.stage-pill-btn');
+        if (!btn || !currentStagedData) return;
+        document.querySelectorAll('.stage-pill-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        const stageName = btn.dataset.stage;
+        if (stageName === 'all') {
+            renderStageToCanvas(currentStagedData.final_canvas_data_url);
+            activeStagePill.textContent = 'Stage: All';
+            stageSlider.value = currentStagedData.stages.length;
+        } else {
+            const idx = currentStagedData.stages.findIndex(s => s.stage_name === stageName);
+            if (idx >= 0) {
+                renderStageToCanvas(currentStagedData.stages[idx].canvas_data_url);
+                activeStagePill.textContent = `Stage: ${stageName}`;
+                stageSlider.value = idx + 1;
+            }
+        }
+    });
+}
+
+// A/B Benchmark Execution
+const btnRunAB = document.getElementById('btnRunAB');
+const abPromptInput = document.getElementById('abPromptInput');
+const abStagedPreview = document.getElementById('abStagedPreview');
+const abDirectPreview = document.getElementById('abDirectPreview');
+const abStagedBadge = document.getElementById('abStagedBadge');
+const abDirectBadge = document.getElementById('abDirectBadge');
+
+if (btnRunAB) {
+    btnRunAB.addEventListener('click', async () => {
+        const prompt = (abPromptInput && abPromptInput.value.trim()) || 'a figure standing in relaxed pose';
+        const seed = parseInt(seedInput.value, 10) || 42;
+        const temperature = parseFloat(tempSlider.value) || 0.5;
+        const top_k = parseInt(topkSlider.value, 10) || 25;
+
+        btnRunAB.disabled = true;
+        btnRunAB.textContent = '⏳ Running A/B benchmark...';
+        abStagedPreview.innerHTML = '<span style="color:var(--accent);">Generating 4-stage progression...</span>';
+        abDirectPreview.innerHTML = '<span style="color:var(--text-dim);">Generating direct pass baseline...</span>';
+
+        try {
+            const res = await fetch('/api/compare_ab', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt, seed, temperature, top_k })
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+
+            // Populate Column A (Staged)
+            abStagedPreview.innerHTML = data.staged.svg;
+            abStagedBadge.textContent = `${data.staged.num_stages} Stages • ${data.staged.total_tokens} Toks`;
+
+            // Populate Column B (Direct Pass)
+            abDirectPreview.innerHTML = data.unconditioned.svg;
+            abDirectBadge.textContent = `${data.unconditioned.num_stages} Stage • ${data.unconditioned.total_tokens} Toks`;
+        } catch (err) {
+            console.error('A/B error:', err);
+            alert(`A/B benchmark error: ${err.message}`);
+        } finally {
+            btnRunAB.disabled = false;
+            btnRunAB.textContent = '⚖️ Run A/B Benchmark';
+        }
+    });
+}
+
+// A/B Presets
+document.querySelectorAll('.ab-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        if (abPromptInput) {
+            abPromptInput.value = btn.dataset.prompt;
+            if (btnRunAB) btnRunAB.click();
+        }
+    });
+});

@@ -1,6 +1,8 @@
 """Lightweight HTTP server providing the interactive Live Drawing Studio webview."""
 
 import argparse
+import base64
+import io
 import json
 import mimetypes
 import os
@@ -15,9 +17,24 @@ import torch
 from .renderer import actions_to_bezier_segments, render_svg
 from .sampling import generate, generate_with_prefix
 from .training import load_model
+from .v2.schema import DocumentV2, PointV2, StrokeActionV2
+from .v2.renderer import export_svg_v2, render_document_v2
+from .v2.convert_v1 import v1_to_v2
+from .v2.tokens import doc_to_token_sequence, token_sequence_to_doc, VOCAB_SIZE
+from .model.stroke_transformer import KonnonStagedTransformer
+from .model.text_encoder import FrozenTextEncoder
+from .model.sampling import generate_staged_drawing, sample_stage_tokens
 
 WEB_DIR = Path(__file__).parent / "web"
 PROJECT_ROOT = Path(__file__).parent.parent.parent
+
+
+def image_to_data_url(img) -> str:
+    """Converts a PIL Image to a base64 PNG data URL."""
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{b64}"
 
 
 class DrawingStudioHandler(BaseHTTPRequestHandler):
@@ -25,6 +42,37 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
     ckpt = None
     classes = []
     checkpoint_path = ""
+    staged_model = None
+    staged_encoder = None
+    staged_ckpt_path = None
+
+    @classmethod
+    def get_staged_model(cls):
+        if cls.staged_model is None:
+            ckpt_path = PROJECT_ROOT / "outputs_v2" / "laptop" / "checkpoints" / "best.pt"
+            if not ckpt_path.exists():
+                ckpt_path = PROJECT_ROOT / "outputs_v2" / "tiny" / "checkpoints" / "best.pt"
+            if ckpt_path.exists():
+                c_data = torch.load(ckpt_path, map_location="cpu")
+                cfg = c_data.get("config", {})
+                m_cfg = cfg.get("model", {})
+                cls.staged_model = KonnonStagedTransformer(
+                    vocab_size=VOCAB_SIZE,
+                    d_model=m_cfg.get("d_model", 256),
+                    n_layers=m_cfg.get("n_layers", 4),
+                    n_heads=m_cfg.get("n_heads", 8),
+                    d_ff=m_cfg.get("d_ff", 768),
+                    max_seq_len=m_cfg.get("max_seq_len", 160),
+                    canvas_res=cfg.get("data", {}).get("canvas_res", 128),
+                )
+                cls.staged_model.load_state_dict(c_data["model_state_dict"])
+                cls.staged_model.eval()
+                cls.staged_encoder = FrozenTextEncoder(
+                    model_type=cfg.get("text_encoder", {}).get("model_type", "builtin"),
+                    d_model=m_cfg.get("d_model", 256),
+                )
+                cls.staged_ckpt_path = ckpt_path
+        return cls.staged_model, cls.staged_encoder
 
     def log_message(self, format, *args):
         # Keep server log concise and robust
@@ -63,12 +111,16 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/status":
+            stg_model, _ = self.get_staged_model()
             self.send_json({
                 "status": "ready",
                 "checkpoint": str(self.checkpoint_path),
                 "classes": self.classes,
-                "hidden_dim": self.ckpt.get("config", {}).get("hidden_dim", 256),
+                "hidden_dim": self.ckpt.get("config", {}).get("hidden_dim", 256) if self.ckpt else 256,
                 "parameters": self.model.num_parameters() if hasattr(self.model, "num_parameters") else 390000,
+                "staged_model_ready": stg_model is not None,
+                "staged_checkpoint": str(self.staged_ckpt_path) if self.staged_ckpt_path else None,
+                "staged_parameters": sum(p.numel() for p in stg_model.parameters()) if stg_model else 0,
             })
             return
 
@@ -256,8 +308,6 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
 
             if hasattr(DrawingStudioHandler, "general_model") and DrawingStudioHandler.general_model is not None:
                 from .general.sampling_general import generate_from_prompt, generate_with_prefix_prompt
-                from .renderer_v2 import export_svg_v2
-                from .schema_v2 import v1_to_v2
 
                 if prefix and isinstance(prefix, list) and len(prefix) > 0:
                     pref_doc = v1_to_v2(prefix)
@@ -309,6 +359,173 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
                 self.send_json(response_data)
                 return
 
+        if path == "/api/generate_staged":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(content_length)
+            try:
+                payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+            except Exception:
+                payload = {}
+
+            prompt = payload.get("prompt", "a figure standing in relaxed pose")
+            stages = payload.get("stages", ["layout", "guide", "ink", "shade"])
+            seed = int(payload.get("seed", 42))
+            temperature = float(payload.get("temperature", 0.5))
+            top_k = int(payload.get("top_k", 25))
+
+            stg_model, stg_encoder = self.get_staged_model()
+            if stg_model is None or stg_encoder is None:
+                self.send_json({"error": "Staged transformer model checkpoint not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            gen_res = generate_staged_drawing(
+                model=stg_model,
+                text_encoder=stg_encoder,
+                prompt=prompt,
+                stages=stages,
+                canvas_res=128,
+                out_res=512,
+                temperature=temperature,
+                top_k=top_k,
+                seed=seed,
+            )
+
+            stage_history_res = []
+            cum_doc = DocumentV2()
+            for h in gen_res["stage_history"]:
+                stg_doc = token_sequence_to_doc(h["tokens"])
+                for cmd in stg_doc.commands:
+                    setattr(cmd, "stage", h["stage_name"])
+                cum_doc.commands.extend(stg_doc.commands)
+                stg_svg = export_svg_v2(cum_doc, width=512, height=512)
+                stage_history_res.append({
+                    "stage_name": h["stage_name"],
+                    "token_count": len(h["tokens"]),
+                    "svg": stg_svg,
+                    "canvas_data_url": image_to_data_url(h["canvas_image"]),
+                })
+
+            final_svg = export_svg_v2(gen_res["doc"], width=512, height=512)
+
+            response_data = {
+                "prompt": prompt,
+                "seed": seed,
+                "temperature": temperature,
+                "top_k": top_k,
+                "total_tokens": sum(len(h["tokens"]) for h in gen_res["stage_history"]),
+                "stages": stage_history_res,
+                "final_svg": final_svg,
+                "final_canvas_data_url": image_to_data_url(gen_res["final_image"]),
+                "doc": gen_res["doc"].to_dict(),
+            }
+            self.send_json(response_data)
+            return
+
+        if path == "/api/compare_ab":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(content_length)
+            try:
+                payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+            except Exception:
+                payload = {}
+
+            prompt = payload.get("prompt", "a standing figure")
+            seed = int(payload.get("seed", 42))
+            temperature = float(payload.get("temperature", 0.5))
+            top_k = int(payload.get("top_k", 25))
+
+            stg_model, stg_encoder = self.get_staged_model()
+            if stg_model is None or stg_encoder is None:
+                self.send_json({"error": "Staged transformer model checkpoint not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            # A: Staged multi-stage generation (Layout -> Guide -> Ink -> Shade)
+            staged_res = generate_staged_drawing(
+                model=stg_model,
+                text_encoder=stg_encoder,
+                prompt=prompt,
+                stages=["layout", "guide", "ink", "shade"],
+                canvas_res=128,
+                out_res=512,
+                temperature=temperature,
+                top_k=top_k,
+                seed=seed,
+            )
+            staged_svg = export_svg_v2(staged_res["doc"], width=512, height=512)
+            staged_tokens = sum(len(h["tokens"]) for h in staged_res["stage_history"])
+
+            # B: Unconditioned / Single-Stage baseline (Single-pass ink)
+            single_res = generate_staged_drawing(
+                model=stg_model,
+                text_encoder=stg_encoder,
+                prompt=prompt,
+                stages=["ink"],
+                canvas_res=128,
+                out_res=512,
+                temperature=temperature,
+                top_k=top_k,
+                seed=seed,
+            )
+            single_svg = export_svg_v2(single_res["doc"], width=512, height=512)
+            single_tokens = sum(len(h["tokens"]) for h in single_res["stage_history"])
+
+            response_data = {
+                "prompt": prompt,
+                "seed": seed,
+                "staged": {
+                    "num_stages": len(staged_res["stage_history"]),
+                    "stage_names": ["layout", "guide", "ink", "shade"],
+                    "total_tokens": staged_tokens,
+                    "svg": staged_svg,
+                    "canvas_data_url": image_to_data_url(staged_res["final_image"]),
+                },
+                "unconditioned": {
+                    "num_stages": 1,
+                    "stage_names": ["ink (single-pass)"],
+                    "total_tokens": single_tokens,
+                    "svg": single_svg,
+                    "canvas_data_url": image_to_data_url(single_res["final_image"]),
+                },
+                "summary": {
+                    "staged_token_count": staged_tokens,
+                    "unconditioned_token_count": single_tokens,
+                    "multi_stage_advantage": "Multi-stage conditioning grounds ink passes on prior guide marks.",
+                }
+            }
+            self.send_json(response_data)
+            return
+
+        if path == "/api/record_stylus_stroke":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(content_length)
+            try:
+                payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+            except Exception:
+                payload = {}
+
+            raw_pts = payload.get("points", [])
+            brush = payload.get("brush", "ink_liner")
+            color = payload.get("color", "#000000")
+            base_width = float(payload.get("base_width", 2.0))
+            stage = payload.get("stage", "sketch")
+
+            pts = [PointV2(x=float(p["x"]), y=float(p["y"]), p=float(p.get("pressure", 1.0)), tilt=float(p.get("tilt", 0.0))) for p in raw_pts]
+            doc = DocumentV2()
+            if pts:
+                stroke = StrokeActionV2(points=pts, brush_id=brush, color=color, base_width=base_width, stage=stage)
+                doc.commands.append(stroke)
+
+            svg = export_svg_v2(doc, width=512, height=512)
+            self.send_json({
+                "recorded_points": len(pts),
+                "brush": brush,
+                "base_width": base_width,
+                "stage": stage,
+                "svg": svg,
+                "doc": doc.to_dict(),
+            })
+            return
+
         self.send_error(HTTPStatus.NOT_FOUND, "Endpoint Not Found")
 
     def serve_file(self, file_path: Path, content_type: str):
@@ -327,16 +544,35 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
 def run_server(host: str = "127.0.0.1", port: int = 8080, checkpoint_path: str = "outputs/checkpoints/best.pt"):
     ckpt_path = Path(checkpoint_path)
     if not ckpt_path.exists():
-        raise FileNotFoundError(f"Checkpoint not found at {checkpoint_path}")
+        # Fallback to outputs_qd or outputs
+        if Path("outputs_v2/laptop/checkpoints/best.pt").exists():
+            ckpt_path = Path("outputs_v2/laptop/checkpoints/best.pt")
+        elif Path("outputs_qd_h384/checkpoints/best.pt").exists():
+            ckpt_path = Path("outputs_qd_h384/checkpoints/best.pt")
+        elif Path("outputs_qd/checkpoints/best.pt").exists():
+            ckpt_path = Path("outputs_qd/checkpoints/best.pt")
 
-    print(f"Loading trained Claude model from {ckpt_path}...")
-    model, ckpt = load_model(str(ckpt_path))
-    classes = ckpt.get("classes", ["bed", "bicycle", "car", "chair", "house", "table"])
+    print(f"Loading checkpoint from {ckpt_path}...")
+    ckpt_raw = torch.load(str(ckpt_path), map_location="cpu")
+    if "model_config" in ckpt_raw:
+        from .model.gru import DrawingGRU
+        model = DrawingGRU(**ckpt_raw["model_config"])
+        model.load_state_dict(ckpt_raw["model_state"])
+        model.eval()
+        ckpt = ckpt_raw
+        classes = ckpt.get("classes", ["bed", "bicycle", "car", "chair", "house", "table"])
+    else:
+        model = None
+        ckpt = ckpt_raw
+        classes = ["bed", "bicycle", "car", "chair", "house", "table"]
 
     DrawingStudioHandler.model = model
     DrawingStudioHandler.ckpt = ckpt
     DrawingStudioHandler.classes = classes
     DrawingStudioHandler.checkpoint_path = ckpt_path
+
+    # Pre-warm staged model
+    DrawingStudioHandler.get_staged_model()
 
     server = ThreadingHTTPServer((host, port), DrawingStudioHandler)
     url = f"http://{host}:{port}"
