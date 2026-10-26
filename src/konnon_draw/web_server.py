@@ -77,6 +77,7 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
     def get_staged_model(cls):
         if cls.staged_model is None:
             candidates = [
+                PROJECT_ROOT / "outputs_v2" / "scaled_116m" / "checkpoint_best.pt",
                 PROJECT_ROOT / "outputs_v2" / "scaled" / "full" / "checkpoint_best.pt",
                 PROJECT_ROOT / "outputs_v2" / "laptop" / "checkpoints" / "best.pt",
                 PROJECT_ROOT / "outputs_v2" / "overfit" / "model_overfit.pt",
