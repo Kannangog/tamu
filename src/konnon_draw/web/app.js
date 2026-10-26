@@ -73,15 +73,35 @@ function setupCanvas() {
 window.addEventListener('resize', setupCanvas);
 window.addEventListener('DOMContentLoaded', setupCanvas);
 
-// Category Selection
-categoryButtons.addEventListener('click', (e) => {
-    const btn = e.target.closest('.category-btn');
-    if (!btn) return;
-    document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    currentCategory = btn.dataset.cat;
-    startNewDrawing();
-});
+// Category Selection (Fallback if present)
+if (categoryButtons) {
+    categoryButtons.addEventListener('click', (e) => {
+        const btn = e.target.closest('.category-btn');
+        if (!btn) return;
+        document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentCategory = btn.dataset.cat;
+        startNewDrawing();
+    });
+}
+
+// Prompt Presets Bar
+const promptPresetsBar = document.getElementById('promptPresetsBar');
+if (promptPresetsBar) {
+    promptPresetsBar.addEventListener('click', (e) => {
+        const btn = e.target.closest('.prompt-preset-chip');
+        if (!btn) return;
+        document.querySelectorAll('.prompt-preset-chip').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const textPromptInput = document.getElementById('textPromptInput');
+        if (textPromptInput && btn.dataset.prompt) {
+            textPromptInput.value = btn.dataset.prompt;
+        }
+        if (btnGenerateStaged) {
+            btnGenerateStaged.click();
+        }
+    });
+}
 
 // Speed slider
 speedSlider.addEventListener('input', () => {
@@ -440,7 +460,11 @@ btnPlayPause.addEventListener('click', () => {
         pauseDrawing();
     } else {
         if (currentIndex >= currentActions.length || currentActions.length === 0) {
-            startNewDrawing();
+            if (btnGenerateStaged) {
+                btnGenerateStaged.click();
+            } else {
+                startNewDrawing();
+            }
         } else {
             playDrawing();
         }
@@ -475,7 +499,7 @@ function stopAnimation() {
 btnStep.addEventListener('click', () => {
     if (isPlaying) pauseDrawing();
     if (currentActions.length === 0) {
-        startNewDrawing();
+        if (btnGenerateStaged) btnGenerateStaged.click();
         return;
     }
     if (currentIndex < currentActions.length) {
@@ -876,7 +900,11 @@ setupCanvas();
 fetchModelStatus();
 loadShowcase();
 loadHandDemos();
-startNewDrawing();
+
+// Auto-trigger staged generation on startup instead of legacy v1 quickdraw
+if (btnGenerateStaged) {
+    btnGenerateStaged.click();
+}
 
 // =====================================================================
 // Phase 5: Staged Scrubber, Stylus HUD & Recorder, and A/B Comparison
@@ -931,8 +959,11 @@ if (btnGenerateStaged) {
         const top_k = parseInt(topkSlider.value, 10) || 25;
 
         btnGenerateStaged.disabled = true;
-        btnGenerateStaged.textContent = '⏳ Drawing in stages...';
+        btnGenerateStaged.textContent = '🎨 Drawing in stages...';
         stopAnimation();
+        currentActions = [];
+        currentIndex = 0;
+        tokenFeed.innerHTML = '<div style="color:var(--text-dim); text-align:center; padding: 24px 0;">⚡ Generating strokes across 4 visual stages (Layout → Guide → Ink → Shade)...</div>';
 
         try {
             const res = await fetch('/api/generate_staged', {

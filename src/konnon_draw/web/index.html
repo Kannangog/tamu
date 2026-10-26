@@ -180,6 +180,34 @@
             box-shadow: 0 0 16px var(--accent-glow);
         }
 
+        .prompt-preset-chip {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 6px 14px;
+            border-radius: var(--radius-md);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .prompt-preset-chip:hover {
+            border-color: var(--accent);
+            color: var(--text-main);
+            transform: translateY(-1px);
+        }
+
+        .prompt-preset-chip.active {
+            background: rgba(99, 102, 241, 0.25);
+            border-color: var(--accent);
+            color: #ffffff;
+            box-shadow: 0 0 12px var(--accent-glow);
+        }
+
         .canvas-viewport-wrapper {
             position: relative;
             width: 100%;
@@ -781,9 +809,8 @@
         <section class="stage-card">
             <!-- Konnon Draw General & Staged Prompt Bar -->
             <div class="prompt-bar-container" style="display: flex; gap: 10px; width: 100%;">
-                <input type="text" id="textPromptInput" class="seed-input" style="flex: 1; font-size: 14px; padding: 10px 14px;" placeholder="Enter drawing prompt, e.g.: a figure standing in relaxed pose / a wooden chair" value="a figure standing in relaxed pose">
+                <input type="text" id="textPromptInput" class="seed-input" style="flex: 1; font-size: 14px; padding: 10px 14px;" placeholder="Enter drawing prompt, e.g.: a figure in dynamic action pose / a perspective drawing of a house" value="a figure in dynamic action pose">
                 <button class="btn btn-primary" id="btnGenerateStaged" style="padding: 10px 18px; font-weight: 700; white-space: nowrap; background: linear-gradient(135deg, #10b981, #06b6d4); border-color: #10b981;">🎨 Generate Staged (v0)</button>
-                <button class="btn" id="btnGenerateText" style="padding: 10px 14px; font-weight: 600; white-space: nowrap;">✨ Quickdraw Text</button>
             </div>
 
             <!-- Staged Drawing Scrubber Bar -->
@@ -812,13 +839,14 @@
                 <span>Click & drag with mouse, stylus, or touch to draw anytime</span>
             </div>
 
-            <div class="category-selector" id="categoryButtons">
-                <button class="category-btn active" data-cat="bicycle">🚲 Bicycle</button>
-                <button class="category-btn" data-cat="car">🚗 Car</button>
-                <button class="category-btn" data-cat="chair">🪑 Chair</button>
-                <button class="category-btn" data-cat="house">🏠 House</button>
-                <button class="category-btn" data-cat="bed">🛏️ Bed</button>
-                <button class="category-btn" data-cat="table">🪵 Table</button>
+            <div class="prompt-presets-bar" id="promptPresetsBar" style="display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px 0;">
+                <span style="font-size: 11px; color: var(--text-dim); align-self: center; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Prompt Presets:</span>
+                <button class="btn prompt-preset-chip active" data-prompt="a figure in dynamic action pose" style="padding: 4px 10px; font-size: 11px;">🏃 Dynamic Action Pose</button>
+                <button class="btn prompt-preset-chip" data-prompt="a perspective drawing of a house with front facade and side depth" style="padding: 4px 10px; font-size: 11px;">🏠 3D House</button>
+                <button class="btn prompt-preset-chip" data-prompt="a wooden chair in three-quarter perspective" style="padding: 4px 10px; font-size: 11px;">🪑 Perspective Chair</button>
+                <button class="btn prompt-preset-chip" data-prompt="a figure standing in relaxed pose" style="padding: 4px 10px; font-size: 11px;">🧍 Standing Pose</button>
+                <button class="btn prompt-preset-chip" data-prompt="a commuter bicycle with dual wheels" style="padding: 4px 10px; font-size: 11px;">🚲 Bicycle</button>
+                <button class="btn prompt-preset-chip" data-prompt="a sports car in dynamic three-quarter view" style="padding: 4px 10px; font-size: 11px;">🚗 Sports Car</button>
             </div>
 
             <div class="canvas-viewport-wrapper">
