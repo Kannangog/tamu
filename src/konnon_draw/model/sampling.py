@@ -28,13 +28,13 @@ from ..gym.stage_generator import STAGE_ORDER
 def sample_stage_tokens(
     model: KonnonStagedTransformer,
     context: torch.Tensor,
-    max_tokens: int = 160,
+    max_tokens: int = 256,
     temperature: float = 0.5,
     top_k: int = 25,
     device: str = "cpu",
     seed: int = 42,
-    length_prior_alpha: float = 0.04,
-    min_stage_tokens: int = 16,
+    length_prior_alpha: float = 0.005,
+    min_stage_tokens: int = 24,
 ) -> List[int]:
     """Autoregressively samples a sequence of drawing tokens for one stage using KV-cache."""
     torch.manual_seed(seed)
@@ -137,7 +137,7 @@ def generate_staged_drawing(
         stage_tokens = sample_stage_tokens(
             model=model,
             context=context,
-            max_tokens=160,
+            max_tokens=256,
             temperature=temperature,
             top_k=top_k,
             device=device,
