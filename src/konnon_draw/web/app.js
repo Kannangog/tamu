@@ -43,6 +43,15 @@ const btnDownloadJson = document.getElementById('btnDownloadJson');
 const categoryButtons = document.getElementById('categoryButtons');
 const showcaseGrid = document.getElementById('showcaseGrid');
 
+// Staged Transformer Controls (116.4M Parameter Model)
+const btnGenerateStaged = document.getElementById('btnGenerateStaged');
+const activeStagePill = document.getElementById('activeStagePill');
+const stageSlider = document.getElementById('stageSlider');
+const stageSliderLabel = document.getElementById('stageSliderLabel');
+const stagePills = document.getElementById('stagePills');
+const textPromptInput = document.getElementById('textPromptInput');
+let currentStagedData = null;
+
 // Vector Engine Toggles (Option 1)
 const chkSmoothBezier = document.getElementById('chkSmoothBezier');
 const chkShowHandles = document.getElementById('chkShowHandles');
@@ -446,7 +455,6 @@ async function startNewDrawingFromPrompt(prompt, prefixActions = null) {
 }
 
 const btnGenerateText = document.getElementById('btnGenerateText');
-const textPromptInput = document.getElementById('textPromptInput');
 if (btnGenerateText) {
     btnGenerateText.addEventListener('click', () => {
         const prompt = textPromptInput ? textPromptInput.value.trim() : 'a red circle above a blue square';
@@ -942,24 +950,19 @@ if (tabBtnStudio && tabBtnAB) {
 
 
 
-// Staged Generation & Scrubber
-let currentStagedData = null;
-const btnGenerateStaged = document.getElementById('btnGenerateStaged');
-const activeStagePill = document.getElementById('activeStagePill');
-const stageSlider = document.getElementById('stageSlider');
-const stageSliderLabel = document.getElementById('stageSliderLabel');
-const stagePills = document.getElementById('stagePills');
-
+// Staged Generation & Scrubber (116.4M Parameter Model)
 if (btnGenerateStaged) {
     btnGenerateStaged.addEventListener('click', async () => {
         const promptInput = document.getElementById('textPromptInput');
-        const prompt = (promptInput && promptInput.value.trim()) || 'a figure standing in relaxed pose';
+        const prompt = (promptInput && promptInput.value.trim()) || 'a commuter bicycle with dual wheels';
         const seed = parseInt(seedInput.value, 10) || 42;
         const temperature = parseFloat(tempSlider.value) || 0.2;
         const top_k = parseInt(topkSlider.value, 10) || 10;
 
         btnGenerateStaged.disabled = true;
-        btnGenerateStaged.textContent = '🎨 Drawing in stages...';
+        btnGenerateStaged.textContent = '🎨 Generating 116M Model (~20s)...';
+        penStateLabel.textContent = '🧠 116.4M Transformer computing strokes in stages...';
+        progressBarFill.style.width = '35%';
         stopAnimation();
         currentActions = [];
         currentIndex = 0;
@@ -991,7 +994,30 @@ if (btnGenerateStaged) {
             // Render stage image to canvas
             renderStageToCanvas(data.final_canvas_data_url);
 
+            // Populate currentActions for live replay / step
+            currentActions = [];
+            if (data.doc && Array.isArray(data.doc.commands)) {
+                for (const cmd of data.doc.commands) {
+                    if (cmd.type === 'stroke' && Array.isArray(cmd.points) && cmd.points.length >= 2) {
+                        currentActions.push({ type: 'MOVE', x: cmd.points[0].x, y: cmd.points[0].y });
+                        for (let i = 1; i < cmd.points.length; i++) {
+                            currentActions.push({ type: 'LINE', x: cmd.points[i].x, y: cmd.points[i].y });
+                        }
+                        currentActions.push({ type: 'PEN_UP' });
+                    }
+                }
+                if (currentActions.length > 0) {
+                    currentActions.push({ type: 'END' });
+                    currentIndex = currentActions.length;
+                    btnReplay.disabled = false;
+                }
+            }
+
             tokenCountBadge.textContent = `${data.total_tokens} tokens`;
+            penStateLabel.textContent = `✅ Complete: Generated ${data.total_tokens} tokens across 4 visual stages`;
+            stepCounterLabel.textContent = `STEP: ${currentActions.length} / ${currentActions.length}`;
+            progressBarFill.style.width = '100%';
+
             tokenFeed.innerHTML = data.stages.map(stg => `
                 <div class="token-row">
                     <span class="token-idx" style="color:var(--accent);">STAGE</span>
@@ -1001,10 +1027,12 @@ if (btnGenerateStaged) {
             `).join('');
         } catch (err) {
             console.error('Staged generation error:', err);
+            penStateLabel.textContent = '❌ Generation error: ' + err.message;
+            progressBarFill.style.width = '0%';
             alert(`Staged generation error: ${err.message}`);
         } finally {
             btnGenerateStaged.disabled = false;
-            btnGenerateStaged.textContent = '🎨 Generate Staged (v0)';
+            btnGenerateStaged.textContent = '🎨 Generate Staged (116M)';
         }
     });
 }
