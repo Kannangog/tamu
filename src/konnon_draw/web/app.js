@@ -955,8 +955,8 @@ if (btnGenerateStaged) {
         const promptInput = document.getElementById('textPromptInput');
         const prompt = (promptInput && promptInput.value.trim()) || 'a figure standing in relaxed pose';
         const seed = parseInt(seedInput.value, 10) || 42;
-        const temperature = parseFloat(tempSlider.value) || 0.5;
-        const top_k = parseInt(topkSlider.value, 10) || 25;
+        const temperature = parseFloat(tempSlider.value) || 0.2;
+        const top_k = parseInt(topkSlider.value, 10) || 10;
 
         btnGenerateStaged.disabled = true;
         btnGenerateStaged.textContent = '🎨 Drawing in stages...';
