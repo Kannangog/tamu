@@ -557,33 +557,51 @@ function redrawCanvasUpTo(limitIdx) {
     const { w, h } = getCanvasSize();
     ctx.clearRect(0, 0, w, h);
 
-    // Reconstruct paths up to limitIdx
+    // Reconstruct paths up to limitIdx with color, width, and opacity
     const paths = [];
     let cur = [];
+    let curMeta = { color: '#0f172a', width: 3, opacity: 1.0 };
+
     for (let i = 0; i < limitIdx; i++) {
         const a = currentActions[i];
         if (a.type === 'MOVE') {
+            if (cur.length > 0) paths.push({ pts: cur, ...curMeta });
             cur = [{ x: a.x * w, y: a.y * h }];
+            curMeta = {
+                color: a.color || '#0f172a',
+                width: a.width || 3,
+                opacity: a.opacity !== undefined ? a.opacity : 1.0,
+            };
         } else if (a.type === 'LINE') {
             if (cur.length > 0) cur.push({ x: a.x * w, y: a.y * h });
         } else if (a.type === 'PEN_UP') {
-            if (cur.length > 0) { paths.push(cur); cur = []; }
+            if (cur.length > 0) {
+                paths.push({ pts: cur, ...curMeta });
+                cur = [];
+            }
         }
     }
-    if (cur.length > 0) paths.push(cur);
+    if (cur.length > 0) paths.push({ pts: cur, ...curMeta });
 
     // Render paths
     const useBezier = chkSmoothBezier ? chkSmoothBezier.checked : true;
     const showHandles = chkShowHandles ? chkShowHandles.checked : false;
 
-    paths.forEach(pts => {
-        if (pts.length < 2) return;
-        renderPathOnCanvas(pts, useBezier, showHandles);
+    paths.forEach(pObj => {
+        if (!pObj.pts || pObj.pts.length < 2) return;
+        renderPathOnCanvas(pObj.pts, useBezier, showHandles, pObj.color, pObj.width, pObj.opacity);
     });
 }
 
-function renderPathOnCanvas(points, useBezier, showHandles) {
+function renderPathOnCanvas(points, useBezier, showHandles, color = '#0f172a', strokeWidth = 3, opacity = 1.0) {
     if (points.length < 2) return;
+
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = strokeWidth;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
 
     if (!useBezier || points.length < 3) {
         // Simple polygonal
@@ -592,9 +610,8 @@ function renderPathOnCanvas(points, useBezier, showHandles) {
         for (let i = 1; i < points.length; i++) {
             ctx.lineTo(points[i].x, points[i].y);
         }
-        ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 3;
         ctx.stroke();
+        ctx.restore();
         return;
     }
 
@@ -640,14 +657,11 @@ function renderPathOnCanvas(points, useBezier, showHandles) {
         }
     }
 
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 3;
     ctx.stroke();
 
     // Render Tangent Control Handles if enabled
     if (showHandles && handlePairs.length > 0) {
         handlePairs.forEach(h => {
-            // Tangent lines
             ctx.beginPath();
             ctx.moveTo(h.p1.x, h.p1.y);
             ctx.lineTo(h.cx1, h.cy1);
@@ -657,14 +671,15 @@ function renderPathOnCanvas(points, useBezier, showHandles) {
             ctx.lineWidth = 1;
             ctx.stroke();
 
-            // Handle points
-            ctx.fillStyle = '#f59e0b';
             ctx.beginPath();
-            ctx.arc(h.cx1, h.cy1, 3, 0, Math.PI * 2);
-            ctx.arc(h.cx2, h.cy2, 3, 0, Math.PI * 2);
+            ctx.arc(h.cx1, h.cy1, 2, 0, Math.PI * 2);
+            ctx.arc(h.cx2, h.cy2, 2, 0, Math.PI * 2);
+            ctx.fillStyle = '#f59e0b';
             ctx.fill();
         });
     }
+
+    ctx.restore();
 }
 
 function executeStep(idx) {
@@ -681,10 +696,11 @@ function executeStep(idx) {
         stylusRipple.style.top = `${sy}px`;
     }
 
+    const stgTag = a.stage ? `[${a.stage.toUpperCase()}] ` : '';
     if (a.type === 'MOVE') {
         stylus.classList.remove('pen-up');
         currentPaths.push([{ x: a.x * w, y: a.y * h }]);
-        penStateLabel.textContent = `PEN DOWN: MOVE (${a.x.toFixed(3)}, ${a.y.toFixed(3)})`;
+        penStateLabel.textContent = `🎨 ${stgTag}MOVE (${a.x.toFixed(2)}, ${a.y.toFixed(2)})`;
     } else if (a.type === 'LINE') {
         stylus.classList.remove('pen-up');
         if (currentPaths.length === 0) {
@@ -692,13 +708,13 @@ function executeStep(idx) {
         } else {
             currentPaths[currentPaths.length - 1].push({ x: a.x * w, y: a.y * h });
         }
-        penStateLabel.textContent = `DRAWING: LINE (${a.x.toFixed(3)}, ${a.y.toFixed(3)})`;
+        penStateLabel.textContent = `✏️ ${stgTag}DRAWING (${a.x.toFixed(2)}, ${a.y.toFixed(2)})`;
     } else if (a.type === 'PEN_UP') {
         stylus.classList.add('pen-up');
-        penStateLabel.textContent = 'PEN UP: REPOSITIONING';
+        penStateLabel.textContent = `✒️ ${stgTag}PEN UP (Repositioning)`;
     } else if (a.type === 'END') {
         stylus.classList.add('pen-up');
-        penStateLabel.textContent = 'FINISHED: END TOKEN';
+        penStateLabel.textContent = '✅ FINISHED: ALL STAGES COMPLETE';
     }
 
     // Incremental or full redraw
@@ -991,32 +1007,47 @@ if (btnGenerateStaged) {
             stageSliderLabel.textContent = `Stage ${data.stages.length}/${data.stages.length}`;
             activeStagePill.textContent = `Stage: Complete (${data.total_tokens} tokens)`;
 
-            // Render stage image to canvas
-            renderStageToCanvas(data.final_canvas_data_url);
-
-            // Populate currentActions for live replay / step
+            // Populate currentActions with layer colors, widths and stages
             currentActions = [];
             if (data.doc && Array.isArray(data.doc.commands)) {
                 for (const cmd of data.doc.commands) {
                     if (cmd.type === 'stroke' && Array.isArray(cmd.points) && cmd.points.length >= 2) {
-                        currentActions.push({ type: 'MOVE', x: cmd.points[0].x, y: cmd.points[0].y });
+                        const color = cmd.color || '#111827';
+                        const width = cmd.base_width || 3.0;
+                        const opacity = (typeof cmd.opacity === 'number') ? cmd.opacity : 1.0;
+                        const stage = cmd.stage || 'ink';
+
+                        currentActions.push({ type: 'MOVE', x: cmd.points[0].x, y: cmd.points[0].y, color, width, opacity, stage });
                         for (let i = 1; i < cmd.points.length; i++) {
-                            currentActions.push({ type: 'LINE', x: cmd.points[i].x, y: cmd.points[i].y });
+                            currentActions.push({ type: 'LINE', x: cmd.points[i].x, y: cmd.points[i].y, color, width, opacity, stage });
                         }
-                        currentActions.push({ type: 'PEN_UP' });
+                        currentActions.push({ type: 'PEN_UP', color, width, opacity, stage });
                     }
                 }
                 if (currentActions.length > 0) {
                     currentActions.push({ type: 'END' });
-                    currentIndex = currentActions.length;
-                    btnReplay.disabled = false;
                 }
             }
 
             tokenCountBadge.textContent = `${data.total_tokens} tokens`;
-            penStateLabel.textContent = `✅ Complete: Generated ${data.total_tokens} tokens across 4 visual stages`;
-            stepCounterLabel.textContent = `STEP: ${currentActions.length} / ${currentActions.length}`;
-            progressBarFill.style.width = '100%';
+            tokenFeed.innerHTML = '';
+            btnReplay.disabled = false;
+
+            // Start LIVELY REAL-TIME ANIMATED DRAWING!
+            stopAnimation();
+            const { w, h } = getCanvasSize();
+            ctx.clearRect(0, 0, w, h);
+            currentIndex = 0;
+            currentPaths = [];
+
+            // Set brisk animation speed (30ms per point)
+            if (speedSlider) {
+                speedSlider.value = 30;
+                if (speedLabel) speedLabel.textContent = '30ms';
+            }
+
+            // Animate pen live across the canvas!
+            playDrawing();
 
             tokenFeed.innerHTML = data.stages.map(stg => `
                 <div class="token-row">
