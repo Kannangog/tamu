@@ -367,7 +367,7 @@ def ingest_all_quickdraw_staged(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--categories", nargs="+", default=None)
-    parser.add_argument("--drawings_per_cat", type=int, default=1000)
+    parser.add_argument("--drawings_per_cat", "--samples_per_cat", dest="drawings_per_cat", type=int, default=1000)
     parser.add_argument("--out_dir", default="data/processed/quickdraw_staged_50k")
     parser.add_argument("--max_seq_len", type=int, default=512)
     parser.add_argument("--canvas_res", type=int, default=128)
