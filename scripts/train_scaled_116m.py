@@ -21,8 +21,10 @@ import json
 import math
 import os
 from pathlib import Path
+import shutil
 import time
 from typing import Any, Dict, List, Optional, Tuple
+import zipfile
 
 import numpy as np
 from PIL import Image
@@ -388,9 +390,28 @@ def train_116m_model(
             torch.save(ckpt_state, ckpt_best_path)
             print(f"  ⭐ NEW BEST CHECKPOINT SAVED (Val Loss: {best_val_loss:.5f}) -> {ckpt_best_path}")
 
+            # If running in Kaggle, mirror directly to /kaggle/working/
+            kw = Path("/kaggle/working")
+            if kw.exists():
+                try:
+                    torch.save(ckpt_state, kw / "checkpoint_best.pt")
+                    with zipfile.ZipFile(kw / "checkpoint_116m_best.zip", "w", zipfile.ZIP_DEFLATED) as zf:
+                        zf.write(ckpt_best_path, arcname="checkpoint_best.pt")
+                    test_img_p = out_p / f"test_epoch_{epoch}.png"
+                    if test_img_p.exists():
+                        shutil.copy(str(test_img_p), str(kw / f"test_epoch_{epoch}.png"))
+                        shutil.copy(str(test_img_p), str(kw / "test_latest.png"))
+                    print(f"  📦 Auto-mirrored to {kw / 'checkpoint_best.pt'} & {kw / 'checkpoint_116m_best.zip'}")
+                except Exception as e:
+                    print(f"  Kaggle mirror note: {e}")
+
     print("\n" + "=" * 70)
     print(f"TRAINING COMPLETE! Best Validation Loss: {best_val_loss:.5f}")
     print(f"Exported Model: {ckpt_best_path}")
+    kw = Path("/kaggle/working")
+    if kw.exists():
+        print(f"Permanent Output: {kw / 'checkpoint_best.pt'}")
+        print(f"Downloadable ZIP: {kw / 'checkpoint_116m_best.zip'}")
     print("=" * 70)
 
     return {"best_val_loss": best_val_loss, "checkpoint": str(ckpt_best_path)}
