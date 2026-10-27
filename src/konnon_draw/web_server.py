@@ -421,6 +421,7 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
             seed = int(payload.get("seed", 42))
             temperature = float(payload.get("temperature", 0.5))
             top_k = int(payload.get("top_k", 25))
+            repetition_penalty = float(payload.get("repetition_penalty", 1.3))
 
             stg_model, stg_encoder = self.get_staged_model()
             if stg_model is None or stg_encoder is None:
@@ -436,6 +437,7 @@ class DrawingStudioHandler(BaseHTTPRequestHandler):
                 out_res=512,
                 temperature=temperature,
                 top_k=top_k,
+                repetition_penalty=repetition_penalty,
                 seed=seed,
             )
 

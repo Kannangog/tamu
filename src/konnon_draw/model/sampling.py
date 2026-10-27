@@ -35,6 +35,8 @@ def sample_stage_tokens(
     seed: int = 42,
     length_prior_alpha: float = 0.005,
     min_stage_tokens: int = 24,
+    repetition_penalty: float = 1.3,
+    repetition_window: int = 16,
 ) -> List[int]:
     """Autoregressively samples a sequence of drawing tokens for one stage using KV-cache."""
     torch.manual_seed(seed)
@@ -69,6 +71,15 @@ def sample_stage_tokens(
             # Calibrated length prior encouraging natural stage termination
             next_logits[EOS_TOKEN] += length_prior_alpha * (step - min_stage_tokens)
 
+        # Sliding-window repetition penalty to prevent coordinate attractor sinks
+        if repetition_penalty != 1.0 and len(tokens) > 4:
+            recent_tokens = tokens[-repetition_window:]
+            for t in set(recent_tokens):
+                if next_logits[t] > 0:
+                    next_logits[t] /= repetition_penalty
+                else:
+                    next_logits[t] *= repetition_penalty
+
         # Temperature scaling & Top-K filtering
         if temperature > 0:
             scaled_logits = next_logits / max(1e-4, temperature)
@@ -98,6 +109,7 @@ def generate_staged_drawing(
     out_res: int = 512,
     temperature: float = 0.5,
     top_k: int = 25,
+    repetition_penalty: float = 1.3,
     device: str = "cpu",
     seed: int = 42,
 ) -> Dict[str, Any]:
@@ -140,6 +152,7 @@ def generate_staged_drawing(
             max_tokens=256,
             temperature=temperature,
             top_k=top_k,
+            repetition_penalty=repetition_penalty,
             device=device,
             seed=stg_seed,
         )

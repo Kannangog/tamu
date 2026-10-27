@@ -972,8 +972,8 @@ if (btnGenerateStaged) {
         const promptInput = document.getElementById('textPromptInput');
         const prompt = (promptInput && promptInput.value.trim()) || 'a commuter bicycle with dual wheels';
         const seed = parseInt(seedInput.value, 10) || 42;
-        const temperature = parseFloat(tempSlider.value) || 0.2;
-        const top_k = parseInt(topkSlider.value, 10) || 10;
+        const temperature = parseFloat(tempSlider.value) || 0.5;
+        const top_k = parseInt(topkSlider.value, 10) || 25;
 
         btnGenerateStaged.disabled = true;
         btnGenerateStaged.textContent = '🎨 Generating 116M Model (~20s)...';
@@ -988,7 +988,7 @@ if (btnGenerateStaged) {
             const res = await fetch('/api/generate_staged', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt, seed, temperature, top_k })
+                body: JSON.stringify({ prompt, seed, temperature, top_k, repetition_penalty: 1.3 })
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
